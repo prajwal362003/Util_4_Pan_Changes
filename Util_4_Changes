@@ -1,0 +1,33 @@
+int pan = 0;   // NEW
+
+
+
+
+
+
+// NEW: copy Others_PAN only when KYC or POA/POI docs were separated
+if (kyc > 0 || poa_poi > 0) {
+    for (Path filepath : files) {
+        if (isPanDocument(filepath)) {
+            logger.info("PAN file path : " + filepath);
+            copyKycDocuments(filepath, zipInputFolder);
+            pan++;
+        }
+    }
+}
+logger.info("pan : " + pan);
+
+
+
+
+
+
+
+
+// NEW: identifies files like 00000085002550101_Others_PAN.pdf
+private static boolean isPanDocument(Path file) {
+    String[] fileName = file.getFileName().toString().toLowerCase().split("_");
+    return fileName.length > 2
+            && fileName[1].equals("others")
+            && fileName[2].startsWith("pan");
+}
