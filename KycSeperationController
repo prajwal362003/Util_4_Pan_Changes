@@ -1,0 +1,622 @@
+package com.sbi.controller;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+
+import java.net.InetAddress;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+
+import com.sbi.configuration.ExtractProperties;
+import com.sbi.dto.CkycEnqResponseBean;
+import com.sbi.dto.Customer;
+import com.sbi.dto.CustomerNormalDetailsEnquiryResponse;
+import com.sbi.enums.FilePaths;
+import com.sbi.exception.ApiNonRetryableException;
+import com.sbi.exception.ApiRetryableException;
+import com.sbi.exception.RetriesExhaustedException;
+import com.sbi.model.CersaiEnquiryData;
+import com.sbi.model.DocLogger;
+import com.sbi.model.FolderIdentifier;
+import com.sbi.service.CbsApiIService;
+import com.sbi.service.CersaiApiService;
+import com.sbi.service.CustomerService;
+
+@Controller
+public class KycSeperationController {
+
+	@Autowired
+	private CustomerService customerService;
+
+	@Autowired
+	private CbsApiIService cbsApiService;
+
+	@Autowired
+	private CersaiApiService cersaiApiService;
+
+	@Autowired
+	private FileSeperation fileSeperation;
+
+	int batchSize=Integer.parseInt(ExtractProperties.getInstance().getProperty("batch.size"));
+	int allowdDiffDays=Integer.parseInt(ExtractProperties.getInstance().getProperty("NoOfDays"));
+	private int maxApiRetries=Integer.parseInt(ExtractProperties.getInstance().getProperty("max.Api.retry"));
+
+	long staleProcessingMinutes=Long.parseLong(ExtractProperties.getInstance().getProperty("stable.process.minutes"));//1;
+	long stabilityWindowSeconds=Long.parseLong(ExtractProperties.getInstance().getProperty("stablity.window.seconds"));//60;
+	private int clusterSize=Integer.parseInt(ExtractProperties.getInstance().getProperty("cluster.size")); // 1;
+	private int serverIndex=Integer.parseInt(ExtractProperties.getInstance().getProperty("server.index"));//0;
+	private long retryBackoffMillis=Long.parseLong(ExtractProperties.getInstance().getProperty("Retry.Millis"));//2000;
+
+	String inputPath=ExtractProperties.getInstance().getProperty("INPUT_FOLD_PROCCESS");
+	String processigPath=ExtractProperties.getInstance().getProperty("Input.processing");
+	//String outputDirPath=ExtractProperties.getInstance().getProperty("INPUT_FOLD");//
+	private final String failedDirPath=ExtractProperties.getInstance().getProperty("EXCEPTION_FOLD");//
+	String lcpcLists=ExtractProperties.getInstance().getProperty("LCPC_NAME");
+
+	String status="";
+
+	private static final Logger logger = (Logger) LogManager.getLogger(KycSeperationController.class);
+	private final String hostId = resolveHostId();
+
+	private static String resolveHostId() {
+		try {
+			return InetAddress.getLocalHost().getHostName() + "-" + ProcessHandle.current().pid();
+		} catch (Exception e) {
+			return "unknown-" + ProcessHandle.current().pid();
+		}
+	}
+
+	public void seperateDocuments() {
+		Set<String> lcpcSet=Arrays.stream(lcpcLists.split(",")).collect(Collectors.toSet());
+		for(String lcpc: lcpcSet) {
+			String inputPathLcpc=inputPath+"/"+lcpc;
+			String inputProcessPathLcpc=processigPath+"/"+lcpc;
+			seperateDocumentsOfLCPC(inputPathLcpc,inputProcessPathLcpc,lcpc);
+		}
+	}
+
+
+	public void seperateDocumentsOfLCPC(String inputPathLcpc, String inputProcessPathLcpc, String lcpc) {
+		//LCPC_NAME
+		Path inputDir = Paths.get(inputPathLcpc);
+		Path processingDir = Paths.get(inputProcessPathLcpc);
+		logger.info("inputDir {} and processigPath {}", inputDir, processingDir);
+		reconcileStaleFolders(processingDir, inputDir);
+
+		List<Path> candidates = fetchOldestFolders(inputDir, batchSize);
+		logger.info("Fetched {} candidate folders for this batch", candidates.size());
+		if (candidates.isEmpty()) {
+			logger.info("No eligible customer folders found in {}", inputDir);
+			return;
+		}
+		logger.info("List of folders : "+candidates);
+
+		for (Path customerFolder : candidates) {
+			String customerId = customerFolder.getFileName().toString();
+			logger.info("customerId : "+customerId);
+			Path claimed = claimFolder(customerFolder, processingDir);
+			if (claimed == null) continue;
+			try {
+				processCustomerFolder(claimed, customerId,lcpc);
+				logger.info("Customer {} processed and moved to output", customerId);
+			} catch (Exception e) {
+				logger.error("Processing failed for customer {}: {}", customerId, e.getMessage(), e);
+				try {
+					moveTo(claimed, Paths.get(failedDirPath, customerId));
+				} catch (IOException moveEx) {
+					logger.error("Could not move failed folder {} out of processing dir: {}", customerId, moveEx.getMessage(), moveEx);
+				}
+			}
+		}
+	}
+
+
+	private void moveTo(Path source, Path target) throws IOException {
+		if(Files.exists(target)){
+			deleteDirectoryRecursively(target);
+		}
+		Files.createDirectories(target.getParent());
+		Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+	}
+
+	private void processCustomerFolder(Path claimedFolder, String customerId,String lcpc) {
+		String remarks="";
+		boolean rejectCustomer=false;
+		FolderIdentifier id;
+		String[] folderValues=customerId.split("_");
+		Customer customer = new Customer(folderValues[0],folderValues[1],folderValues[2]);
+		try {
+			id = FolderIdentifier.parse(customerId);
+		} catch (IllegalArgumentException badName) {
+			generateResponse(false,claimedFolder,customerId,customer,"INVALID_FOLDER_NAME: " + badName.getMessage(),lcpc,"",status);
+			//moveToException(claimedFolder,lcpc, customerId, "INVALID_FOLDER_NAME: " + badName.getMessage());
+			return;
+		}
+
+		if (!customerService.checkStatusInPerfiosTable(customer.cifNumber())) {
+			generateResponse(false, claimedFolder, customerId,  customer,  "CIF UNDER PROCESS ", lcpc,"",status);
+			//moveToException(claimedFolder,lcpc, customerId, "CIF UNDER PROCESS ");
+			return;
+		}
+
+		CkycEnqResponseBean cbs60429Data=null;
+		try {
+			cbs60429Data =fetch60429(customer); //cbsApiService.fetch60429(customer);  //60429 should be complete - Expected enquiry response 0
+		}catch(Exception apiFailure) {
+			generateResponse(false, claimedFolder, customerId,  customer,  "CBS API_FAILURE: " + apiFailure.getMessage(), lcpc,"",status);
+			//moveToException(claimedFolder, lcpc, customerId, "CBS API_FAILURE: " + apiFailure.getMessage());
+			// customerDao.insertHistory(id.cif(), "Moved to exception - API failure: " + apiFailure.getMessage());
+			return;
+		}
+		logger.info(" cbs60429Data  "/* +cbs60429Data */);
+		String ckyc_number = "";
+		if (cbs60429Data != null) {
+			if(cbs60429Data.getRESPONSE_STATUS().equals("1")) {
+				logger.info(" Response Message from 60429 API :   "+cbs60429Data.getERROR_DESCRIPTION());
+				generateResponse(false, claimedFolder, customerId,  customer,  "CBS Enquiry_th - "+cbs60429Data.getERROR_DESCRIPTION(), lcpc,"",status);
+				//moveToException(claimedFolder,lcpc, customerId, cbs60429Data.getERROR_DESCRIPTION());
+				return ;
+			}
+
+			try{
+				cbsApiService.save60429IntoCkyc(cbs60429Data,customer);
+			}catch(Exception e) {
+				logger.info(" Error while saving 60429 data  ");
+			}
+
+			try{
+				ckyc_number = cbs60429Data.getCKYC_PERSONAL_DETAILS().getCKYC_NUMBER();
+			}catch(Exception ex) {
+				logger.error("Exception: " + ex.getMessage());
+			}
+			logger.info("ckyc_number: " + ckyc_number);
+		} else {
+			logger.error("Error: CBS Data could not be fetched. Check encryption/certificate logs.");
+		}
+
+		CustomerNormalDetailsEnquiryResponse cbs67000Data = cbsApiService.fetch67000data(customer); //Receive kyc update date from CBS
+
+		String cbs_kyc_date = "";
+		if (cbs67000Data != null) {
+			if(cbs67000Data.getRESPONSE_STATUS().equals("1")) {
+				logger.info(" Response Message from 67000 API :   "+cbs67000Data.getERROR_DESCRIPTION());
+				generateResponse(false, claimedFolder, customerId,  customer,  "CBS NormalDetailsEnquiry - "+cbs67000Data.getERROR_DESCRIPTION(), lcpc,"",status);
+				//moveToException(claimedFolder,lcpc, customerId, cbs60429Data.getERROR_DESCRIPTION());
+				return;
+			}
+
+			try{
+				cbsApiService.save67000IntoCkyc(cbs67000Data,cbs60429Data,customer);
+			}catch(Exception e) {
+				logger.info(" Error while saving 60429 data  ");
+			}
+			cbs_kyc_date = cbs67000Data.getKYC_DETAILS_UPDATED_ON();
+			logger.info("CBS KYC Date: " + cbs_kyc_date);
+		} else {
+			logger.error("Error: CBS Data could not be fetched. Check encryption/certificate logs.");
+		}
+
+		boolean ckycNumberExist=checkCkycNumber(cbs60429Data.getCKYC_PERSONAL_DETAILS().getCKYC_NUMBER());
+		logger.info("ckycNumberExist : " +ckycNumberExist);
+
+		if(ckycNumberExist) {
+			generateResponse(false, claimedFolder, customerId,  customer,  "Ckyc number alredy present in CBS", lcpc,ckyc_number,status);	
+			logger.info("Process completed for a customer "+claimedFolder.getFileName());
+			return;
+		}		
+
+		DateTimeFormatter dtf = DateTimeFormatter.ofPattern("ddMMyyyy");
+		
+		boolean cbsDateIsLatest=false;
+		boolean lcpcDateIsLatest=false;
+
+		LocalDate cbsDate =null;
+		LocalDate lcpcDate =null;
+
+		String branchKycDate=customerService.fetchBranchKycDate(customer.cifNumber());
+		try { 
+			logger.info(" Date received from branch :    "+branchKycDate);
+
+			lcpcDate=parseIfPresent(branchKycDate,dtf);
+			cbsDate=parseIfPresent(cbs_kyc_date,dtf);
+			
+		//	cbsDate =  LocalDate.parse("2026-08-22");
+
+			if (cbsDate != null && lcpcDate != null) {
+				if (cbsDate.isAfter(lcpcDate)) {
+					logger.info("CBS record is more recent than LCPC/Branch.");
+					long diffDays = ChronoUnit.DAYS.between(lcpcDate, cbsDate);
+					if(diffDays<=allowdDiffDays) {
+						logger.info(" CBS date is ahead of "+diffDays+". Considering both dates are same ");
+						cbsDateIsLatest=true;
+					}else {
+						remarks="Found date difference more than "+allowdDiffDays;
+						rejectCustomer=true;
+					}				
+					cbsDateIsLatest = true;
+				} else if (cbsDate.isBefore(lcpcDate)) {
+					logger.info("Lcpc record is more recent than CBS date");
+					lcpcDateIsLatest = true;
+				}
+			} else if (cbsDate != null) {
+				logger.info("LCPC date is not available");
+				cbsDateIsLatest=true;
+			} else if (lcpcDate != null) {
+				logger.info("CBS date is not available");
+				lcpcDateIsLatest=true;
+			}
+		} catch (Exception e) {
+			logger.error("Facing error parsing dates " + e.getMessage());
+		}
+
+		if(!cbsDateIsLatest&&!lcpcDateIsLatest) {
+			rejectCustomer=true;
+			remarks="Not found KYC update date of a customer in CBS";
+		}else if(lcpcDateIsLatest) {
+			rejectCustomer=true;
+			remarks="Not updated customer records into CBS";
+		}
+
+		if(rejectCustomer) generateResponse(false, claimedFolder, customerId, customer, remarks, lcpc, ckyc_number,status);	
+
+		CersaiEnquiryData cersaiEnquiryData=null;
+		try {
+			cersaiEnquiryData=cersaiApiService.fetchCersaidata(customer,cbs60429Data);
+		} catch (Exception e) {
+			logger.error("Facing error parsing dates " + e.getMessage());
+			generateResponse(false, claimedFolder, customerId,  customer,  "Error from Cersai Enquiry", lcpc,ckyc_number,status);	
+		}
+
+		logger.info("CersaiEnquiryResponse : " + cersaiEnquiryData.toString());
+
+		String cersaiKycDate=cersaiEnquiryData.kycUpdateDate();//  2026-08-25
+		
+		//String cersaiKycDate="2026-08-25";
+
+		boolean cersaiDateIsLatest=false;
+		try {
+			logger.info("cbs kyc date : " +cbsDate+"   |   Date received from Cersai "+cersaiKycDate);
+			LocalDate cersaiDate = parseIfPresent(cersaiKycDate, DateTimeFormatter.ofPattern("dd-MM-yyyy"));//25-08-2026
+			logger.info("cersai Date  "+cersaiDate);
+			
+			if (cbsDate != null && cersaiDate != null) {			
+				logger.info("cersai Date : "+cersaiDate+ "   | cbsDate : " +cbsDate);
+				
+				if (cbsDate.isAfter(cersaiDate)) {
+					logger.info("CBS record is more recent than CERSAI.");
+					cbsDateIsLatest = true;
+				} else if (cbsDate.isBefore(cersaiDate)) {
+					logger.info("CERSAI record is more recent than CBS.");
+					cersaiDateIsLatest = true;
+				} else {
+					logger.info("Both dates are the same.");
+				}
+			} else if (cbsDate != null) {
+				logger.info("CERSAI date is not available. Considering CBS date as latest.");
+				cbsDateIsLatest = true;
+			} else if (cersaiDate != null) {
+				logger.info("CBS date is not available. Considering CERSAI date as latest.");
+				cersaiDateIsLatest = true;
+			} else {
+				logger.info("Both dates are not available.");
+			}
+		} catch (Exception e) {
+			logger.error("Facing error parsing dates " + e.getMessage());
+		}
+		boolean perfios=false;
+		if (cersaiDateIsLatest) {
+			logger.info("Skipping the Kyc documents seperation for perfios as ckyc number/reference found and the CKYC date fall ahead");
+			//remarks="Found latest KYC update date in cersai";
+			remarks="No updation required, Found latest KYC update date in cersai";
+			status="KS";
+		}else {
+			try {
+				logger.info("File seperating " );
+				fileSeperation.seperateKycDocs(claimedFolder, lcpc);
+				perfios=true;
+				remarks="Successfully sepearted KYC documents to send it to Perfios";
+				status="ZP";
+			} catch (Exception e) {
+				logger.error(" >>" +e.getMessage());
+			}
+			
+		}
+		logger.info("remarks {}",remarks);
+		generateResponse(perfios,  claimedFolder,  customerId,  customer,  remarks,lcpc,ckyc_number,status);	
+		logger.info("Process completed for a customer "+claimedFolder.getFileName());
+	}
+
+	private void generateResponse(boolean perfios, Path claimedFolder, String customerId, Customer customer, String remarks, String lcpc,String ckyc_number,String status) {
+		logger.info("upload To Edms {}", perfios);
+		String destination;
+		
+		if (status!=null &&"ZP".equals(status)&&perfios) {
+			destination=FilePaths.OutputFolder;
+			customerService.updateStatus(customer,remarks,status);
+		}else if(status!=null &&"KS".equals(status)&&!perfios) {
+			destination=failedDirPath;
+			customerService.updateStatus(customer,remarks, status);
+		}else {
+			destination=failedDirPath;
+			customerService.updateForRejection(customer,remarks);
+		}
+
+		
+		/*
+		
+		
+		else if(!"KS".equals(status)&&!perfios) {
+			destination=failedDirPath;
+			status="";
+		}else if(!"KS".equals(status)&&perfios){
+			destination=FilePaths.OutputFolder;
+			status="ZP";
+		}else if ("KS".equals(status)){
+			
+		}
+		
+		if(!perfios) {
+			destination=failedDirPath;
+			
+		} else {
+			destination=FilePaths.OutputFolder;
+			customerService.updateStatus(customer,remarks);
+		}
+		*/
+		
+		DocLogger.docWriter(claimedFolder.getFileName().toString(),  remarks, lcpc);
+		Path destinationPath=Paths.get(destination+"/"+lcpc+"/"+customerId);
+		logger.info("destinationPath = "+destinationPath);
+		moveDocsWithFolder(claimedFolder, customerId, remarks, destinationPath);
+		customerService.insertHistory(customer, ckyc_number, claimedFolder.getFileName().toString(), remarks);
+	}
+
+
+	private void moveDocsWithFolder(Path claimedFolder, String customerId, String remarks, Path destination) {
+		try {
+			logger.info("current Folder = "+claimedFolder);
+			removeClaimMarker(claimedFolder);
+			if(Files.exists(destination)) deleteDirectoryRecursively(destination);
+			
+			Files.createDirectories(destination.getParent());
+			Files.move(claimedFolder, destination, StandardCopyOption.ATOMIC_MOVE);
+			//Files.move(claimedFolder, destination, StandardCopyOption.REPLACE_EXISTING);
+
+		} catch (IOException e) {
+			logger.error("Could not move {} to exception folder: {}", customerId, e.getMessage(), e);
+		}
+		logger.info("Folder {} moved to destinations: {}", customerId, remarks);
+	}
+
+	private static void removeClaimMarker(Path claimedFolder) {
+		try {
+			Files.deleteIfExists(claimedFolder.resolve(".claim"));
+			logger.info(" .claim removed");
+		}catch(IOException e) {
+			logger.error(e.getMessage());
+		}
+	}
+
+	private CkycEnqResponseBean fetch60429(Customer customer) throws ApiNonRetryableException, RetriesExhaustedException {
+		return callWithRetry(() -> cbsApiService.fetch60429(customer), "60429");
+	}
+
+	@FunctionalInterface
+	private interface ApiCall<T> {
+		T call() throws ApiRetryableException, ApiNonRetryableException;
+	}
+
+	private <T> T callWithRetry(ApiCall<T> apiCall, String apiName) throws ApiNonRetryableException, RetriesExhaustedException {
+		int attempt = 0;
+		while (true) {
+			attempt++;
+			try {
+				return apiCall.call();
+			} catch (ApiNonRetryableException nonRetryable) {
+				throw nonRetryable; // no point retrying a business rejection
+			} catch (ApiRetryableException retryable) {
+				if (attempt >= maxApiRetries) {
+					throw new RetriesExhaustedException(apiName + " failed after " + attempt + " attempts: " + retryable.getMessage());
+				}
+				logger.error("{} attempt {} failed, retrying: {}", apiName, attempt, retryable.getMessage());
+				sleepQuietly(retryBackoffMillis * attempt); // simple linear backoff
+			}
+		}
+	}
+
+	private static void sleepQuietly(long millis) {
+		try {
+			TimeUnit.MILLISECONDS.sleep(millis);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
+	}
+
+	private static boolean checkCkycNumber(String ckycNumber) {
+		if(ckycNumber==null||ckycNumber.isEmpty()) return false;
+		return ckycNumber.matches("\\d{14}");
+	}
+
+
+
+	private static void deleteDirectoryRecursively(Path target) throws IOException {
+		if(!Files.exists(target)) return;
+		try(Stream<Path> paths = Files.walk(target)){
+			paths.sorted(Comparator.reverseOrder())
+			.forEach(path->{
+				try {
+					Files.delete(path);
+				}catch(IOException e) {
+					throw new UncheckedIOException(e);
+				}
+			});
+		}catch(UncheckedIOException e) {
+			logger.error("exception: {}", e.getCause());
+		}
+	}
+
+	private record FolderWithTime(Path path, long lastModifiedMillis) { }
+
+	private boolean belongsToThisServer(String customerId) {
+		if (clusterSize <= 1) return true;
+		int shard = Math.floorMod(customerId.hashCode(), clusterSize);
+		logger.info("shard {}",shard);
+		return shard == serverIndex;
+	}
+
+	private List<Path> fetchOldestFolders(Path inputDir, int limit) {
+		long now = System.currentTimeMillis();
+		long stabilityMillis = TimeUnit.SECONDS.toMillis(stabilityWindowSeconds);
+		logger.info("staleMillis {} and now {}",stabilityMillis,now);
+		List<FolderWithTime> eligible = new ArrayList<>();
+
+		try (DirectoryStream<Path> stream = Files.newDirectoryStream(inputDir, Files::isDirectory)) {
+			for (Path folder : stream) {
+				logger.info("folder : "+folder);
+				try {
+					BasicFileAttributes attrs = Files.readAttributes(folder, BasicFileAttributes.class);
+					FileTime lastModified = attrs.lastModifiedTime();
+					logger.info("lastModified "+lastModified.toMillis());
+					if (now - lastModified.toMillis() < stabilityMillis) {
+						logger.info("Too fresh - might still be uploading. Skip this cycle.");
+						continue;
+					}
+					if (!belongsToThisServer(folder.getFileName().toString())) {
+						logger.info("staleMillis {} and now {}",stabilityMillis,now);
+						continue; // another server's shard this round
+					}
+					eligible.add(new FolderWithTime(folder, lastModified.toMillis()));
+
+				} catch (IOException e) {
+					logger.error("Could not read attributes for {}, skipping this cycle: {}", folder, e.getMessage());
+				}
+			}
+		} catch (IOException e) {
+			throw new UncheckedIOException("Failed to list input directory " + inputDir, e);
+		}
+
+		eligible.sort(Comparator.comparingLong(f -> f.lastModifiedMillis)); // oldest first
+
+		List<Path> result = new ArrayList<>(Math.min(limit, eligible.size()));
+		for (int i = 0; i < eligible.size() && i < limit; i++) {
+			logger.info("eligible path "+eligible.get(i).path);
+			result.add(eligible.get(i).path);
+		}
+		return result;
+	}
+
+
+	private Path claimFolder(Path sourceFolder, Path processingDir) {
+		String customerId = sourceFolder.getFileName().toString();
+		Path target = processingDir.resolve(customerId);
+		try {
+			Files.createDirectories(processingDir);
+			Path moved = Files.move(sourceFolder, target, StandardCopyOption.ATOMIC_MOVE);
+			logger.info("Path moved : "+moved);
+			writeClaimMarker(moved);
+			return moved;
+		} catch (NoSuchFileException | FileAlreadyExistsException e) {
+		
+			logger.error("Skipping {} - already claimed or conflicting target exists", customerId);
+			return null;
+		} catch (IOException e) {
+			logger.error("Failed to claim folder {}: {}", customerId, e.getMessage(), e);
+			return null;
+		}
+	}
+
+
+
+	private void writeClaimMarker(Path claimedFolder) {
+		Path marker = claimedFolder.resolve(".claim");
+		String content = "host=" + hostId + System.lineSeparator()+ "claimedAt=" + Instant.now() + System.lineSeparator();
+		logger.info("content to write "+content);
+		try {
+			Files.writeString(marker, content, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+		} catch (IOException e) {
+			logger.error("Could not write claim marker for {}: {}", claimedFolder, e.getMessage());
+		}
+	}
+
+
+
+
+	private void reconcileStaleFolders(Path processingDir, Path inputDir) {
+		if (!Files.isDirectory(processingDir)) {
+			return;
+		}
+		long staleMillis = TimeUnit.MINUTES.toMillis(staleProcessingMinutes);
+		long now = System.currentTimeMillis();
+		logger.info("staleMillis {} and now {}",staleMillis,now);
+		try (DirectoryStream<Path> stream = Files.newDirectoryStream(processingDir, Files::isDirectory)) {
+			for (Path folder : stream) {
+				try {
+					long referenceTime = claimMarkerTimeOrLastModified(folder);
+					logger.info("referenceTime {}",referenceTime);
+					if (now - referenceTime < staleMillis) {
+						continue; // still within normal processing time
+					}
+					String customerId = folder.getFileName().toString();
+					logger.info("customerId "+customerId);
+					Path backToInput = inputDir.resolve(customerId);
+					logger.info("backToInput {}",backToInput);
+					try {
+						Files.move(folder, backToInput, StandardCopyOption.ATOMIC_MOVE);
+						logger.info("Reclaimed stale folder {} (idle > {} min) back to input for retry",
+								customerId, staleProcessingMinutes);
+					} catch (NoSuchFileException | FileAlreadyExistsException raceLost) {
+						// Another server already reclaimed it (or finished it) - fine.
+						logger.error("Could not evaluate {} during stale reconciliation: {}", folder, raceLost.getMessage());
+					}
+				} catch (IOException e) {
+					logger.error("Could not evaluate {} during stale reconciliation: {}", folder, e.getMessage());
+				}
+			}
+		} catch (IOException e) {
+			logger.error("Could not scan processing dir for reconciliation: {}", e.getMessage());
+		}
+	}
+
+
+
+	private long claimMarkerTimeOrLastModified(Path folder) throws IOException {
+		Path marker = folder.resolve(".claim");
+		if (Files.exists(marker)) {
+			return Files.getLastModifiedTime(marker).toMillis();
+		}
+		return Files.getLastModifiedTime(folder).toMillis();
+	}
+
+
+
+	private static LocalDate parseIfPresent(String dateStr, DateTimeFormatter dtf) {
+		return (dateStr!=null&&!dateStr.isEmpty())?LocalDate.parse(dateStr,dtf):null;
+	}
+}
