@@ -1,0 +1,63 @@
+package com.sbi.serviceImpl;
+
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.sbi.configuration.ExtractProperties;
+import com.sbi.dao.CustomerDao;
+import com.sbi.dto.Customer;
+import com.sbi.service.CustomerService;
+
+@Service
+public class CustomerServiceImpl implements CustomerService {
+	
+	@Autowired
+	CustomerDao customerDao;
+	
+	private static final Logger logger = (Logger) LogManager.getLogger(CustomerServiceImpl.class);
+	
+	String docSeperationStatus=ExtractProperties.getInstance().getProperty("seperation.status");
+
+	@Override
+	public boolean checkStatusInPerfiosTable(String cifNumber) {
+		String status=customerDao.fetchCifStatusFromPerfiosTable(cifNumber);
+		 logger.info("Staus fetched from kyc perfios customer details = "+status);
+		if(status.equals(docSeperationStatus)) 
+			return true;
+		return false;
+	}
+
+	@Override
+	public String fetchBranchKycDate(String cif) {
+		return customerDao.fetchKycDateOfBranch(cif);
+	}
+
+	@Override
+	public void insertHistory(Customer customer,String ckyc,String customerFolder,String remarks) {
+		customerDao.insertHistory(customer,ckyc, customerFolder, remarks);
+	}
+
+//	@Override
+//	public void updateStatus(Customer customer, String remarks) {
+//		customerDao.updateStatus(customer, remarks);
+//	}
+	
+	public void updateStatus(Customer customer, String remarks, String status) {
+		customerDao.updateStatus(customer, remarks, status);
+	}
+
+	@Override
+	public void updateForRejection(Customer customer, String remarks) {
+		customerDao.updateStatusForRejection(customer, remarks);
+		
+	}
+
+	
+
+}
