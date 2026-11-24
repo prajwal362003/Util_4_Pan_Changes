@@ -1,0 +1,412 @@
+package com.sbi.daoImpl;
+
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Random;
+import java.sql.Date;
+import java.sql.ResultSet;
+import org.springframework.jdbc.core.RowMapper;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.jdbc.core.BeanPropertyRowMapper;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+import com.sbi.configuration.DataBaseConfiguration;
+import com.sbi.dao.CersaiEnqDAO;
+import com.sbi.dto.CERSAI_ENQUIRY_RES;
+import com.sbi.dto.CersaiEnquiryResponse;
+import com.sbi.dto.CkycDetailsBean;
+import com.sbi.dto.upfrontEnqBean;
+
+@Repository
+public class CersaiEnqDAOimpl implements CersaiEnqDAO{
+
+	final static Logger logger = LogManager.getLogger(CersaiEnqDAOimpl.class);
+	
+	private static final JdbcTemplate jdbcTemplate = new JdbcTemplate(DataBaseConfiguration.getDataSource());
+	private static final NamedParameterJdbcTemplate namedParameterJdbcTemplate =  new NamedParameterJdbcTemplate(DataBaseConfiguration.getDataSource());
+	
+	@Override
+	public ArrayList<upfrontEnqBean> upfrontEnq(String cifNumber) {
+
+		ArrayList<upfrontEnqBean> pendingListDetails1 = new ArrayList<upfrontEnqBean>();
+		try {
+			if (namedParameterJdbcTemplate == null) {
+				try {
+				//	dataSource();
+					logger.info("Loading... ");
+				} catch (Exception e) {
+					logger.error("DATASOURCE ERROR>>>>>>>>>>>>>>>>>>>>" + e.getMessage());
+				}
+			} else {
+				logger.info("jdbc template ");
+			}
+
+			String sql = "select cd.applicant_first_name,cd.applicant_last_name, cd.dob,cd.applicant_middle_name, cd.gender,cd.masked_aadhar,cd.it_pan,cd.branch_code,cd.channel_id,cd.account_number,cd.cersai_notif,cd.account_type_flag FROM kycupdate.KYC_CUSTOMER_DETAILS cd where cd.cif_number=:cif_number";
+
+			logger.info("Doing upfront Enq on cif  :- " + cifNumber + "   , QUERY :- " + sql);
+			MapSqlParameterSource mp = new MapSqlParameterSource();
+			mp.addValue("cif_number", cifNumber);
+			try {
+
+				pendingListDetails1 = (ArrayList<upfrontEnqBean>) namedParameterJdbcTemplate.query(sql, mp,
+						new RowMapper<upfrontEnqBean>() {
+
+							public upfrontEnqBean mapRow(ResultSet rs, int rowNum) throws SQLException {
+								upfrontEnqBean bean = new upfrontEnqBean();
+
+								bean.setFirstName(nullToEmpty(rs.getString("applicant_first_name")));
+								bean.setLastName(nullToEmpty(rs.getString("applicant_last_name")));
+								bean.setDob(nullToEmpty(rs.getString("dob")));
+								bean.setMiddleName(nullToEmpty(rs.getString("applicant_middle_name")));
+								bean.setGender(nullToEmpty(rs.getString("gender")));
+								bean.setADHAAR(nullToEmpty(rs.getString("masked_aadhar")));
+								bean.setIT_PAN(nullToEmpty(rs.getString("it_pan")));
+								bean.setBRANCH_CODE(nullToEmpty(rs.getString("branch_code")));
+								bean.setCHANNEL_ID(nullToEmpty(rs.getString("channel_id")));
+								bean.setACC_NUMBER(nullToEmpty(rs.getString("account_number")));
+								bean.setCERSAI_NOTIF(nullToEmpty(rs.getString("cersai_notif")));
+								bean.setACC_TYPE_FLAG(nullToEmpty(rs.getString("account_type_flag")));
+								// logger.info("first name >>>>>>>>> " +
+								// bean.getFirstName());
+								return bean;
+							}
+						});
+			} catch (Exception e) {
+				logger.info("error while execution>>>" + e.getMessage());
+				return new ArrayList<upfrontEnqBean>();
+			}
+
+		} catch (Exception e) {
+			logger.info("error while execution 1>>>" + e.getMessage());
+			e.printStackTrace();
+		}
+		logger.info("EXITING upfront Enquiry Daoimpl >>" + pendingListDetails1.size() + "<<");
+		return pendingListDetails1;
+	}
+	
+	private static String nullToEmpty(String data) {
+		String cleanData = data != null ? data : "";
+		return cleanData;
+	}
+
+	@Override
+	public ArrayList<upfrontEnqBean> getidtype(String cifNumber) {
+
+		ArrayList<upfrontEnqBean> IDdetails = new ArrayList<upfrontEnqBean>();
+		try {
+			if (namedParameterJdbcTemplate == null) {
+				try {
+			//		dataSource();
+					logger.info("Loading... ");
+				} catch (Exception e) {
+					logger.error("DATASOURCE ERROR>>>>>>>>>>>>>>>>>>>>" + e.getMessage());
+				}
+			} else {
+				logger.info("jdbc template ");
+			}
+
+			String sql = "select s.identification_type,s.identity_number,s.masked_aadhar from kycupdate.kyc_identification_details  s where s.cif_number_fk = :cif_number";
+			logger.info("getting identificationtype for cif  :- " + cifNumber + "   , QUERY :- " + sql);
+			MapSqlParameterSource mp = new MapSqlParameterSource();
+			mp.addValue("cif_number", cifNumber);
+
+			try {
+
+				IDdetails = (ArrayList<upfrontEnqBean>) namedParameterJdbcTemplate.query(sql, mp,
+						new RowMapper<upfrontEnqBean>() {
+
+							public upfrontEnqBean mapRow(ResultSet rs, int rowNum) throws SQLException {
+								upfrontEnqBean bean = new upfrontEnqBean();
+
+								bean.setIdType(nullToEmpty(rs.getString("identification_type")));
+								bean.setIdNumber(nullToEmpty(rs.getString("identity_number")));
+								bean.setMasked_aadhar(nullToEmpty(rs.getString("masked_aadhar")));
+								logger.info("identification_type >>>>>>>>> " + bean.getIdType());
+								return bean;
+							}
+						});
+			} catch (Exception e) {
+				logger.info("error while execution>>>" + e.getMessage());
+				return new ArrayList<upfrontEnqBean>();
+			}
+
+		} catch (Exception e) {
+			logger.info("error while execution 1>>>" + e.getMessage());
+			e.printStackTrace();
+		}
+
+		logger.info("EXITING IDtype Enquiry Daoimpl >>" + IDdetails.size() + "<<");
+
+		return IDdetails;
+	}
+	
+
+	@Override
+	public ArrayList<upfrontEnqBean> getidtype1(String ID_TYPE) {
+
+		ArrayList<upfrontEnqBean> IDdetails1 = new ArrayList<upfrontEnqBean>();
+		try {
+			if (namedParameterJdbcTemplate == null) {
+				try {
+				//	dataSource();
+					logger.info("Loading... ");
+				} catch (Exception e) {
+					logger.error("DATASOURCE ERROR>>>>>>>>>>>>>>>>>>>>" + e.getMessage());
+				}
+			} else {
+				logger.info("jdbc template ");
+			}
+			String sql = "select im.image_type, im.image_type || '-' || im.imagetype_des as imagetype_des from gcdckyc.ckyc_imagetype_mapping im where im.imagetype_poi =:ID_TYPE";
+
+			logger.info("getting identificationtype for cif  :- " + ID_TYPE + "   \n QUERY :- " + sql);
+			MapSqlParameterSource mp = new MapSqlParameterSource();
+			mp.addValue("ID_TYPE", ID_TYPE);
+			logger.info("ID_TYPE>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>" + ID_TYPE);
+			try {
+				IDdetails1 = (ArrayList<upfrontEnqBean>) namedParameterJdbcTemplate.query(sql, mp,
+						new RowMapper<upfrontEnqBean>() {
+
+							public upfrontEnqBean mapRow(ResultSet rs, int rowNum) throws SQLException {
+								upfrontEnqBean bean = new upfrontEnqBean();
+
+								bean.setID_TYPENUMBER(nullToEmpty(rs.getString("imagetype_des")));
+								logger.info("identification_type >>>>>>>>> " + bean.getID_TYPENUMBER());
+								return bean;
+							}
+						});
+			} catch (Exception e) {
+				logger.info("error while execution>>>" + e.getMessage());
+				return new ArrayList<upfrontEnqBean>();
+			}
+
+		} catch (Exception e) {
+			logger.info("error while execution 1>>>" + e.getMessage());
+			e.printStackTrace();
+		}
+
+		logger.info("EXITING IDtype Enquiry Daoimpl >>" + IDdetails1.size() + "<<");
+
+		return IDdetails1;
+	}
+
+	@Override
+	public CkycDetailsBean getCKYC_Details(String cifNumber) {
+
+
+		try{
+			if (jdbcTemplate == null) {
+				try {
+				//	dataSource();
+					logger.info("Loading... ");
+				} catch (Exception e) {
+					logger.error("DATASOURCE ERROR>>>>>>>>>>>>>>>>>>>>" + e.getMessage());
+				}
+			} else {
+				logger.info("jdbc template ");
+			}
+			String sql = "select * from kyc_customer_details cd where cd.cif_number=?";
+
+			logger.debug("sql for getting CKYC Details::" + sql + "\nCIF Number::" + cifNumber);
+			CkycDetailsBean ckycDetails = jdbcTemplate.queryForObject(sql, new Object[] { cifNumber },
+					new BeanPropertyRowMapper<CkycDetailsBean>(CkycDetailsBean.class));
+			logger.info("got CKYC Details:::" + ckycDetails.toString());
+			return ckycDetails;
+		}catch(Exception e) {
+			logger.info("Exception:::"+ e.getLocalizedMessage());
+			return null;
+		}
+	}
+	
+	@Override
+	public  ArrayList<upfrontEnqBean> getpincodeMobnoEmail(String cifNumber) {
+		ArrayList<upfrontEnqBean> addrdetails = new ArrayList<upfrontEnqBean>();
+		try {
+			if (namedParameterJdbcTemplate == null) {
+				try {
+				//	dataSource();
+					logger.info("Loading... ");
+				} catch (Exception e) {
+					logger.error("DATASOURCE ERROR>>>>>>>>>>>>>>>>>>>>" + e.getMessage());
+				}
+			} else {
+				logger.info("jdbc template ");
+			}
+			String sql = "select db.mobile_no,db.address_pin_code,db.email_id,db.other_pincode,db.mobile_no_2 from kycupdate.kyc_address_details db where db.cif_number_fk = :cif_number and db.flag_regular_address ='R' and ROWNUM = 1 ";
+			logger.info("getting getpincodeandMobno for cif  :- " + cifNumber + "   , QUERY :- " + sql);
+			MapSqlParameterSource mp = new MapSqlParameterSource();
+			mp.addValue("cif_number", cifNumber);
+			
+			try {
+
+				addrdetails = (ArrayList<upfrontEnqBean>) namedParameterJdbcTemplate.query(sql, mp,
+						new RowMapper<upfrontEnqBean>() {
+
+							public upfrontEnqBean mapRow(ResultSet rs, int rowNum) throws SQLException {
+								upfrontEnqBean bean = new upfrontEnqBean();
+
+								bean.setMobilenumber(nullToEmpty(rs.getString("mobile_no")));
+								bean.setPincode(nullToEmpty(rs.getString("address_pin_code")));
+								bean.setEmailId(nullToEmpty(rs.getString("email_id")));
+								bean.setPinCode2(nullToEmpty(rs.getString("other_pincode")));
+								bean.setMobileNumber2(nullToEmpty(rs.getString("mobile_no_2")));
+								logger.info("up front Enq Bean data>>>>>>>>> " + bean.toString());
+								return bean;
+							}
+						});
+			} catch (Exception e) {
+				e.printStackTrace();
+				logger.info("error while execution>>>" + e.getMessage());
+				System.out.println(e.getStackTrace());
+				return new ArrayList<upfrontEnqBean>();
+			}
+
+		} catch (Exception e) {
+			logger.info("error while execution 1>>>" + e.getMessage());
+			e.printStackTrace();
+		}
+
+		logger.info("EXITING IDtype Enquiry Daoimpl >>" + addrdetails.size() + "<<");
+		return addrdetails;
+	}
+
+	public void insertCersaiEnqResponceNew(CERSAI_ENQUIRY_RES cersaiPidData, String Mobile_no, String pincode,
+			String dob, String cifNumber,String email,String pinCode2, String mobileNumber2) {
+
+		try {
+			logger.info("-----UPDATING insertCersaiEnqResponceNew ---------");
+			
+			if (namedParameterJdbcTemplate == null) {
+				try {
+				//	dataSource();
+					logger.info("Loading... ");
+				} catch (Exception e) {
+					logger.error("DATASOURCE ERROR>>>>>>>>>>>>>>>>>>>>" + e.getMessage());
+				}
+			} else {
+				logger.info("jdbc template ");
+			}
+			
+			String sqlInsert = "insert into kycupdate.cersai_bulk_download_request (cif_number,ckyc_number, ckyc_reference_id,date_of_birth,pincode,mobile_number,branch_code,modified_date,modified_by,req_unique_id,email_id,pincode_2,mobile_number_2) "
+					+ " Values (:cif_number,:ckyc_number,:ckyc_reference_id,:date_of_birth,:pincode,:mobile_number,:branch_code,:sys_date,'QMS',:req_unique_id,:email,:pincode_2,:mobile_number_2)";
+			
+			MapSqlParameterSource mp = new MapSqlParameterSource();
+			mp.addValue("cif_number", cifNumber);
+			mp.addValue("ckyc_number", nullToEmpty(cersaiPidData.getCKYC_NO()));
+			mp.addValue("ckyc_reference_id", nullToEmpty(cersaiPidData.getCKYC_REFERENCE_ID()));
+			//mp.addValue("date_of_birth", dob);
+			
+			LocalDate localDoB = null;
+			try{
+				localDoB=LocalDate.parse(dob, DateTimeFormatter.ofPattern("dd-MM-yyyy"));
+			} catch (DateTimeParseException e) {
+				localDoB=LocalDateTime.parse(dob, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")).toLocalDate();
+			} catch(Exception e) {
+				logger.error("date parse exception  >> " + e.getLocalizedMessage());
+			}
+			logger.info("localDoBh ---------"+localDoB);
+			mp.addValue("date_of_birth", java.sql.Date.valueOf(localDoB));
+			
+			mp.addValue("pincode", pincode);
+			mp.addValue("mobile_number", Mobile_no);
+			mp.addValue("branch_code", nullToEmpty(cersaiPidData.getBRANCH_CODE()));
+			mp.addValue("sys_date", Timestamp.valueOf(LocalDateTime.now()));
+			mp.addValue("req_unique_id", nullToEmpty(generateUniqueId()));
+			mp.addValue("email", nullToEmpty(email));
+			mp.addValue("pincode_2", nullToEmpty(pinCode2));
+			mp.addValue("mobile_number_2", nullToEmpty(mobileNumber2));
+
+			logger.info("insertCersaiEnqResponceNew >> " + sqlInsert);
+			namedParameterJdbcTemplate.update(sqlInsert, mp);
+			logger.info("-----UPDATED SUCCESSFUL insertCersaiEnqResponceNew---------");
+
+		} catch (Exception e) {
+			logger.info(e.getMessage(), e);
+			logger.info("-----insertCersaiEnqResponceNew FAIL ---------");
+		}
+	}
+		
+	private static String generateUniqueId() {
+		Random RANDOM = new Random();
+		return String.valueOf(System.currentTimeMillis()) + RANDOM.nextInt(1000000);
+	}
+	
+	
+	@Override
+	public void insertToDownloadCersaiData(String cif, CersaiEnquiryResponse cersaiEnqResponse) {
+
+		try {
+			logger.info("-----UPDATING insertCersaiEnqResponceNew ---------");
+			
+			if (namedParameterJdbcTemplate == null) logger.info("jdbc template is null");
+			
+			String sqlInsert = "insert into kycupdate.cersai_bulk_download_request (cif_number,ckyc_number, ckyc_reference_id,date_of_birth,pincode,mobile_number,branch_code,modified_date,modified_by,req_unique_id,email_id,pincode_2,mobile_number_2) "
+					+ " Values (:cif_number,:ckyc_number,:ckyc_reference_id,:date_of_birth,:pincode,:mobile_number,:branch_code,:sys_date,'QMS',:req_unique_id,:email,:pincode_2,:mobile_number_2)";
+			
+			logger.info("bulk_download_request insert "+sqlInsert);
+			MapSqlParameterSource mp = new MapSqlParameterSource();
+			mp.addValue("cif_number", cif);
+			mp.addValue("ckyc_number", nullToEmpty(cersaiEnqResponse.getCkycNumber()));
+			mp.addValue("ckyc_reference_id", nullToEmpty(cersaiEnqResponse.getCkycReferenceId()));
+			//mp.addValue("date_of_birth", dob);
+			
+			LocalDate localDoB = null;
+			try{
+				localDoB=LocalDate.parse(cersaiEnqResponse.getDateOfBirth(), DateTimeFormatter.ofPattern("dd-MM-yyyy"));
+			} catch (DateTimeParseException e) {
+				try{
+					localDoB=LocalDateTime.parse(cersaiEnqResponse.getDateOfBirth(), DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")).toLocalDate();
+				}catch(Exception ex) {
+					logger.error(" exception  >> ");
+					localDoB=null;
+				}
+			} catch(Exception e) {
+				logger.error("date parse exception  >> " + e.getLocalizedMessage());
+			}
+			logger.info("localDoBh ---------"+localDoB);
+			Date date = null;
+			try{
+				if(localDoB!=null)
+				 date=java.sql.Date.valueOf(localDoB);
+			}catch(Exception e) {
+				logger.info("");
+			}
+			
+			//mp.addValue("date_of_birth", java.sql.Date.valueOf(localDoB));
+			mp.addValue("date_of_birth", date);
+			
+			mp.addValue("pincode", cersaiEnqResponse.getPincode());
+			mp.addValue("mobile_number", cersaiEnqResponse.getMobileNumber());
+			mp.addValue("branch_code", nullToEmpty(cersaiEnqResponse.getBranchCode()));
+			mp.addValue("sys_date", Timestamp.valueOf(LocalDateTime.now()));
+			mp.addValue("req_unique_id", nullToEmpty(generateUniqueId()));
+			mp.addValue("email", nullToEmpty(cersaiEnqResponse.getEmail()));
+			mp.addValue("pincode_2", nullToEmpty(cersaiEnqResponse.getPincode2()));
+			mp.addValue("mobile_number_2", nullToEmpty(cersaiEnqResponse.getMobileNumber2()));
+
+			logger.info("insertCersaiEnqResponceNew >> " + sqlInsert);
+			namedParameterJdbcTemplate.update(sqlInsert, mp);
+			logger.info("-----UPDATED SUCCESSFUL insertCersaiEnqResponceNew---------");
+
+		} catch (Exception e) {
+			logger.info(e.getMessage(), e);
+			logger.info("-----insertCersaiEnqResponceNew FAIL ---------");
+		}
+	}
+	
+}
+
+
+
+
+
