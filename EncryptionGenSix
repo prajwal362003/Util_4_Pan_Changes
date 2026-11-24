@@ -1,0 +1,241 @@
+
+package com.sbi.encryption;
+
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.Signature;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.util.Arrays;
+import java.util.Enumeration;
+
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+
+import org.apache.commons.codec.binary.Base64;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import com.sbi.configuration.ExtractProperties;
+import com.sbi.dto.EncryptionBean;
+import com.sbi.dto.FinalRes;
+
+
+
+
+
+public class EncryptionGenSix {
+
+    private static EncryptionGenSix instance;
+    private static PublicKey publicKey; // Only one public key is needed
+    private final static String PRIVATE_KEY_PASSPHRASE = ExtractProperties.getInstance().getProperty("ckycPrivKeyPassPhrase");
+    private final static String CKYCPrivateKeyPath = ExtractProperties.getInstance().getProperty("CKYCPrivateKey"); 
+    private static final String PUBLIC_KEY_FILE_PATH = "/IBM/Resources/ENC_EIS.cer";
+    private final static Logger logger = LogManager.getLogger(EncryptionGenSix.class);
+
+    // Public method to provide access to the instance
+    public static synchronized EncryptionGenSix getInstance() {
+        if (instance == null) {
+            instance = new EncryptionGenSix();
+        }
+        return instance;
+    }
+    
+    private EncryptionGenSix() {
+        logger.info("Initializing EncryptionGenSix instance.");
+        try {
+            loadPublicKey(); // Load only one public key
+        } catch (Exception e) {
+            logger.info("Failed to initialize encryption module: {}", e.getMessage(), e);
+            throw new RuntimeException("Could not initialize encryption module", e);
+        }
+    }
+
+    private void loadPublicKey() throws CertificateException, IOException {
+        logger.info("Loading public key from file: {}", PUBLIC_KEY_FILE_PATH);
+        CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
+        try (InputStream is = new FileInputStream(PUBLIC_KEY_FILE_PATH)) {
+            X509Certificate cert = (X509Certificate) certFactory.generateCertificate(is);
+            publicKey = cert.getPublicKey(); // Load only one public key
+            logger.info("Public key loaded successfully.");
+        } catch (FileNotFoundException e) {
+            logger.info("Public key file not found: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    private PrivateKey getKeyFromKeyStore(String keyStoreFile, char[] keyStorePassword, String alias) {
+        logger.info("Accessing key store: {}", keyStoreFile);
+        try (InputStream keyFileStream = new FileInputStream(keyStoreFile)) {
+            KeyStore keyStore = KeyStore.getInstance("PKCS12");
+            keyStore.load(keyFileStream, keyStorePassword);
+            logger.info("Key store loaded successfully.");
+
+            if (alias == null) {
+                Enumeration<String> aliases = keyStore.aliases();
+                if (keyStore.size() > 1) {
+                    throw new IllegalArgumentException("More than 1 key found in the key store. Please specify Key Alias.");
+                }
+                alias = aliases.nextElement();
+            }
+            
+            KeyStore.PrivateKeyEntry entry = (KeyStore.PrivateKeyEntry) keyStore.getEntry(alias, new KeyStore.PasswordProtection(keyStorePassword));
+            logger.info("Private key retrieved for alias: {}", alias);
+            return entry.getPrivateKey();
+            
+        } catch (FileNotFoundException e) {
+            logger.info("Key store file not found: {}", e.getMessage(), e);
+        } catch (Exception e) {
+            logger.info("Error accessing key store: {}", e.getMessage(), e);
+        }
+        
+        return null; // Return null if any exception occurs
+    }
+
+    private String encryptAccEnqKeyUsingPublicKeyGCM(byte[] randomKey) {
+        logger.info("Starting encryption of the session key.");
+        try {
+            Cipher pkCipher = Cipher.getInstance("RSA/ECB/OAEPPadding");
+            pkCipher.init(Cipher.ENCRYPT_MODE, publicKey); // Use the loaded public key
+            byte[] encSessionKey = pkCipher.doFinal(randomKey);
+            logger.info("Session key encrypted successfully.");
+            return new String(Base64.encodeBase64(encSessionKey));
+        } catch (Exception e) {
+            logger.info("Error during encryption of session key: {}", e.getMessage(), e);
+        }
+        
+        
+        
+        return null; // Return null if any exception occurs
+    }
+
+    private String encryptUsingGCM(String requestString, byte[] sessionKey, byte[] iv) {
+        logger.info("Starting encryption of request string.");
+        try {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            SecretKeySpec keySpec = new SecretKeySpec(sessionKey, "AES");
+            GCMParameterSpec gcmParameterSpec = new GCMParameterSpec(128, iv);
+            cipher.init(Cipher.ENCRYPT_MODE, keySpec, gcmParameterSpec);
+            byte[] cipherText = cipher.doFinal(requestString.getBytes(StandardCharsets.UTF_8));
+            logger.info("Request string encrypted successfully.");
+            return new String(Base64.encodeBase64(cipherText));
+        } catch (Exception e) {
+            logger.info("Error during encryption of request string: {}", e.getMessage(), e);
+        }
+        
+        return null; // Return null if any exception occurs
+    }
+    
+    private String signUsingPrivateKey(String requestString, String privateKeyFileName) {
+        logger.info("Signing request string with private key.");
+        try {
+            PrivateKey privateKey = getKeyFromKeyStore(privateKeyFileName, PRIVATE_KEY_PASSPHRASE.toCharArray(), null);
+            Signature signature = Signature.getInstance("SHA256withRSA");
+            signature.initSign(privateKey);
+//            signature.update(requestString.getBytes());
+            byte[] dataByte = requestString.getBytes("UTF-8");
+            signature.update(dataByte);
+            byte[] signedData = signature.sign();
+            logger.info("Request string signed successfully.");
+            return new String(Base64.encodeBase64(signedData));
+        } catch (Exception e) {
+            logger.info("Error signing request: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+
+    private String decryptResponseGCM(byte[] data, byte[] sessionKey) {
+        logger.info("Starting decryption of response.");
+        try {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            SecretKeySpec keySpec = new SecretKeySpec(sessionKey, "AES");
+            ByteBuffer bb = ByteBuffer.wrap(data);
+            byte[] iv = Arrays.copyOfRange(sessionKey, 0, 12);
+            GCMParameterSpec gcmParameterSpec = new GCMParameterSpec(128, iv);
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmParameterSpec);
+            byte[] decryptedText = cipher.doFinal(Base64.decodeBase64(data));
+            logger.info("Response decrypted successfully.");
+            return new String(decryptedText);
+        } catch (Exception e) {
+            logger.info("Error decrypting response: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+
+    public boolean verifyDigiSign(String decryptedClientRequest, String clientSignatureData) {
+        logger.info("Verifying digital signature.");
+        try (FileInputStream fm = new FileInputStream(PUBLIC_KEY_FILE_PATH)) {
+            CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
+            X509Certificate cert = (X509Certificate) certFactory.generateCertificate(fm);
+            PublicKey publicKey = cert.getPublicKey();
+            Signature publicSignature = Signature.getInstance("SHA256withRSA");
+            publicSignature.initVerify(publicKey);
+            publicSignature.update(decryptedClientRequest.getBytes());
+            byte[] signatureBytes = Base64.decodeBase64(clientSignatureData.getBytes());
+
+            boolean isVerified = publicSignature.verify(signatureBytes);
+            logger.info("Digital signature verification result: {}", isVerified);
+            return isVerified;
+        } catch (Exception e) {
+            logger.info("Error verifying digital signature: {}", e.getMessage(), e);
+            return false;
+        }
+    }
+
+    public EncryptionBean EncryptRequest(String reqString, byte[] randomKey) {
+        EncryptionBean enc = new EncryptionBean();
+        logger.info("Starting request encryption.");
+        
+        try {
+            String rsaEncryptedKey = encryptAccEnqKeyUsingPublicKeyGCM(randomKey);
+            String encryptedReqGCM = getInstance().encryptUsingGCM(reqString, randomKey, Arrays.copyOfRange(randomKey, 0, 12));
+            String digitalSign = signUsingPrivateKey(reqString, CKYCPrivateKeyPath);
+            enc.setRsaEncryptedKey(rsaEncryptedKey);
+            enc.setEncryptedReqGCM(encryptedReqGCM);
+            enc.setDigitalSign(digitalSign);
+            logger.info("Request encrypted successfully.");
+        } catch (Exception e) {
+            logger.info("Error during request encryption: {}", e.getMessage(), e);
+        }
+        return enc;
+    }
+
+    public String DecryptRequest(FinalRes resp, byte[] randomKey) {
+        String decryptedString = "";
+        logger.info("Starting decryption of request.");
+        
+        try {
+            decryptedString = getInstance().decryptResponseGCM(resp.getRESPONSE().getBytes(), randomKey);
+            logger.info("Decrypted response: {}", decryptedString);
+        } catch (Exception e) {
+            logger.info("Exception occurred while decrypting response: {}", e.getMessage(), e);
+        }
+        return decryptedString;
+    }
+    
+	/*
+	 * public static EncryptionBean DecryptRequestGen6(FinalResMinor resp,byte[]
+	 * randomKey){ String decryptedString=""; EncryptionBean enc=new
+	 * EncryptionBean(); EncryptionGenSix encGS= new EncryptionGenSix(); try {
+	 * decryptedString = encGS.decryptResponseGCM(resp.getRESPONSE().getBytes(),
+	 * randomKey); logger.info(" decryptedResponse callAPI:::::" + decryptedString);
+	 * 
+	 * boolean verifyDigiSign = encGS.verifyDigiSign(decryptedString,
+	 * resp.getDIGI_SIGN()); logger.info(" verifyDigiSign :::::" + verifyDigiSign);
+	 * logger.info(" verifyDigiSign :::::" + resp.getDIGI_SIGN());
+	 * enc.setDecryptedResponse(decryptedString);
+	 * enc.setVerifyDigitalSign(verifyDigiSign); } catch (Exception e) { logger.
+	 * info("Exception occurred CKYCEnquiryAPIURL while decrypting EIS response",
+	 * e); } return enc; }
+	 */
+}
+// End Of IR 26050066 : 26020077 : SHRAVAN
