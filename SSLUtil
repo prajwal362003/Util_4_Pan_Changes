@@ -1,0 +1,73 @@
+package com.sbi.encryption;
+
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.TrustManager;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
+import javax.net.ssl.X509TrustManager;
+
+
+
+
+
+
+public class SSLUtil {
+	
+	
+	static {
+		HttpsURLConnection.setDefaultHostnameVerifier(new HostnameVerifier() {
+			
+			public boolean verify(String arg0, SSLSession arg1) {
+				// TODO Auto-generated method stub
+				return true;
+			}
+		});
+	}
+	
+	private static final TrustManager[] UNQU_MANAGERS = new TrustManager[] {
+			new X509TrustManager() {
+				
+				public X509Certificate[] getAcceptedIssuers() {
+					return null;
+				}
+				
+				public void checkServerTrusted(X509Certificate[] arg0, String arg1)
+						throws CertificateException {
+					
+				}
+				
+				public void checkClientTrusted(X509Certificate[] arg0, String arg1)
+						throws CertificateException {
+				}
+			}
+			
+		};
+	public static void turnOfSSLChecking() throws NoSuchAlgorithmException, KeyManagementException{
+		final SSLContext sc = SSLContext.getInstance("TLSv1.2");
+		sc.init(null, UNQU_MANAGERS, null);
+		HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+	}
+	public static void turnOnSSLChecking() throws NoSuchAlgorithmException, KeyManagementException{
+		SSLContext.getInstance("TLSv1.2").init(null, UNQU_MANAGERS, new SecureRandom());
+	}
+	
+	
+	public static void turnOfSSLCheckingForsms() throws NoSuchAlgorithmException, KeyManagementException{
+		final SSLContext sc = SSLContext.getInstance("TLSv1.2");
+		sc.init(null, UNQU_MANAGERS, null);
+		HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+	}
+	
+	
+	
+	private SSLUtil(){
+		throw new UnsupportedOperationException("Do not instintitae libraries");
+	}
+}
