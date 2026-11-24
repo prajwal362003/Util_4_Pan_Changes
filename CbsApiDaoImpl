@@ -1,0 +1,2050 @@
+package com.sbi.daoImpl;
+
+import java.time.LocalDate;
+import java.time.Period;
+import java.util.HashMap;
+import java.util.Optional;
+
+import org.apache.commons.lang3.math.NumberUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.stereotype.Repository;
+import org.springframework.util.StringUtils;
+
+import com.sbi.configuration.DataBaseConfiguration;
+import com.sbi.dao.CbsApiDao;
+import com.sbi.dto.CKYC_ACCOUNT_DETAILS;
+import com.sbi.dto.CKYC_ADDRESS_DETAILS;
+import com.sbi.dto.CKYC_PERSONAL_DETAILS;
+import com.sbi.dto.CKYC_RELATED_PERSON_DETAILS;
+import com.sbi.dto.CkycEnqResponseBean;
+import com.sbi.dto.Customer;
+
+@Repository
+public class CbsApiDaoImpl implements CbsApiDao {
+
+
+	final String modifiedBy = "CBS" ;
+
+	private static final JdbcTemplate jdbcTemplate = new JdbcTemplate(DataBaseConfiguration.getDataSource());
+	private static final NamedParameterJdbcTemplate namedParameterJdbcTemplate =  new NamedParameterJdbcTemplate(DataBaseConfiguration.getDataSource());
+	private static final Logger logger = (Logger) LogManager.getLogger(CbsApiDaoImpl.class);
+
+	private String nullCheck(String a) {
+		//return (a==null||a.isEmpty())?"":a;
+		return Optional.ofNullable(a).orElse("");
+	}
+
+	@Override
+	public void saveCbs60429IntoKycTables(CkycEnqResponseBean cbs60429Data,Customer customer) {
+
+		String channel_id =""; 
+
+
+		logger.info("saveEnqRes method starts----");
+
+		String imgtype = "";
+		String dummyCif = "";
+		try{
+
+			String dummyCifVal = "select CIF_NUMBER from kyc_customer_details where CKYC_NUMBER=:ckycNo AND cif_number like 'C%'";
+			logger.info("dummyCifVal :"+dummyCifVal);
+			logger.info("er.getCKYC_PERSONAL_DETAILS().getCKYC_NUMBER() :" +cbs60429Data.getCKYC_PERSONAL_DETAILS().getCKYC_NUMBER());
+			MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+			mpMapSqlParameterSource.addValue("ckycNo", cbs60429Data.getCKYC_PERSONAL_DETAILS().getCKYC_NUMBER());
+			dummyCif = namedParameterJdbcTemplate.queryForObject(dummyCifVal, mpMapSqlParameterSource, String.class);
+			logger.info("Dummy Cif" +dummyCif);
+		}catch(Exception e){
+			//e.printStackTrace();
+			logger.info(e.getMessage());
+			logger.error(e);
+		}
+		try {
+			logger.info("Inside Imagetype method>>>>" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+
+			String Cifno = cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER();
+			String imagetype = "select kk.image_type from kyc_image_details kk where kk.cif_number_fk =:CifNo and kk.image_for in ('POA','KYC')";
+			MapSqlParameterSource mp = new MapSqlParameterSource();
+			mp.addValue("CifNo", Cifno);
+			imgtype = namedParameterJdbcTemplate.queryForObject(imagetype, mp, String.class);
+			logger.info("Imagetype >>>>" + imgtype);
+		} catch (Exception e) {
+			logger.info(e.getMessage());
+			logger.error(e);
+		}
+
+		try{
+			logger.info("setCustomerDetail method starts for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+
+			setCustomerDetail (cbs60429Data, cbs60429Data.getCKYC_PERSONAL_DETAILS() ,cbs60429Data.getCKYC_ADDRESS_DETAILS().getCOUNTRY_CODE_OF_BIRTH(), customer.accountNumber(), dummyCif, customer);
+			logger.info("setCustomerDetail method ends for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+		}catch(Exception e){
+			logger.info("Exception @@@@@setCustomerDetail method ends for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+			e.printStackTrace();
+			logger.info(e);
+		}//CKYC_ADDRESS
+		try{
+			logger.info("setCustomerAdditionalDetail method starts for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+			setCustomerAdditionalDetail (cbs60429Data.getCKYC_PERSONAL_DETAILS(), cbs60429Data.getCKYC_ACCOUNT_DETAILS(),dummyCif);
+			logger.info("setCustomerAdditionalDetail method ends for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+
+
+		}catch(Exception e){
+			logger.info("Exception setCustomerAdditionalDetail method ends for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+			e.printStackTrace();
+			logger.info(e);
+		}
+		try{
+			logger.info("setCustomerAddressDetail method starts for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+			setCustomerAddressDetail (cbs60429Data.getCKYC_ADDRESS_DETAILS(), cbs60429Data.getCKYC_PERSONAL_DETAILS(), dummyCif, channel_id,imgtype);
+			logger.info("setCustomerAddressDetail method ends for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+		}catch(Exception e){
+			logger.info("Exception setCustomerAddressDetail method ends for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+			e.printStackTrace();
+			logger.info(e);
+		}
+		try{
+			logger.info("setCustomerRelatedPersonDetail method starts for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+			setCustomerRelatedPersonDetail (cbs60429Data.getCKYC_RELATED_PERSON_DETAILS(), dummyCif);	
+			logger.info("setCustomerRelatedPersonDetail method ends for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+
+		}catch(Exception e){
+
+			logger.info("Exception setCustomerRelatedPersonDetail method ends for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+			e.printStackTrace();	
+			logger.info(e);
+		}
+		try{
+
+			logger.info("setCustomerIdentityDetail method starts for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+			setCustomerIdentityDetail (cbs60429Data.getCKYC_PERSONAL_DETAILS(), cbs60429Data.getCKYC_PERSONAL_DETAILS(), dummyCif,imgtype,channel_id);
+			logger.info("setCustomerIdentityDetail method ends for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+
+		}catch(Exception e){
+			logger.info("Exception setCustomerIdentityDetail method ends for cif ----" + cbs60429Data.getCKYC_PERSONAL_DETAILS().getCUSTOMER_NUMBER());
+			e.printStackTrace();
+			logger.info(e);
+		}
+	}
+
+
+	private void setCustomerDetail(CkycEnqResponseBean er, CKYC_PERSONAL_DETAILS personalDetail,String dobCountry, String accountNumber, String dummyCif,Customer customer)
+	{
+		boolean backUpFlag = false;
+		if(cifExist(personalDetail.getCUSTOMER_NUMBER())){
+			backUpFlag = backupCustomerDetailhistory(personalDetail.getCUSTOMER_NUMBER());
+			logger.info("Back Up Flag " + backUpFlag);
+		}
+
+		if(!dummyCif.equalsIgnoreCase("")){
+			backupCustomerDetailhistory(dummyCif); // take backup of current db data
+			String removecustomerDetailQuery = "delete from kyc_customer_details where CIF_NUMBER=?";
+			jdbcTemplate.update(removecustomerDetailQuery, dummyCif);
+		}
+
+		String FORM60 = personalDetail.getFORM60() == null ? "":personalDetail.getFORM60();
+		String TRAN_DT_FORM60 = personalDetail.getTRAN_DT_FORM60() == null ? "":personalDetail.getTRAN_DT_FORM60();
+		String SUB_DT_FORM60 = personalDetail.getSUB_DT_FORM60() == null ? "": personalDetail.getSUB_DT_FORM60();
+		String AGRI_INCOME = personalDetail.getAGRI_INCOME() == null ? "":personalDetail.getAGRI_INCOME();
+		String OTHER_INCOME = personalDetail.getOTHER_INCOME() == null ? "":personalDetail.getOTHER_INCOME();
+		String VISA_ISSUE_BY = personalDetail.getVISA_ISSUE_BY() == null ? "": personalDetail.getVISA_ISSUE_BY();
+		String VISA_DETAIL = personalDetail.getVISA_DETAIL() == null ? "": personalDetail.getVISA_DETAIL();
+		String VISA_EXPIRY_DATE = personalDetail.getVISA_EXPIRY_DATE() == null ? "":personalDetail.getVISA_EXPIRY_DATE();	
+		String VISA_ISSUE_DATE = personalDetail.getVISA_ISSUE() == null ? "":personalDetail.getVISA_ISSUE();		    
+
+		logger.info("KYC number received from CBS ::: "+personalDetail.getCKYC_NUMBER());
+		logger.info("CIF number received from CBS ::: "+personalDetail.getCUSTOMER_NUMBER());
+		logger.info("First Name received from CBS ::: "+personalDetail.getFIRST_NAME());
+
+		String residentialStatus = cbsToCkycResiStatus(personalDetail.getRESIDENTIAL_STATUS());
+		logger.info("residentialStatus " + residentialStatus);
+
+		if(dobCountry.equalsIgnoreCase(""))dobCountry = "IN";	 //Setting default value to IN if data not present
+
+		String nationality=personalDetail.getCITIZENSHIP() == null? "":personalDetail.getCITIZENSHIP();
+		if(nationality.equalsIgnoreCase(""))nationality = "IN";
+
+		logger.info("nationality " + nationality);
+
+		String custType = (er.getCUSTOMER_TYPE() != null && er.getCUSTOMER_TYPE().length() >=2) ? er.getCUSTOMER_TYPE().substring(0, 2) : "";  //&& er.getCustomerType().length() == 8
+		logger.info("cust type" + custType);
+		boolean optFlag = false;
+		if(er.getCUSTOMER_TYPE() != null && (er.getCUSTOMER_TYPE().equalsIgnoreCase("010224") || er.getCUSTOMER_TYPE().equalsIgnoreCase("10224"))){
+			optFlag = true;
+		}
+		logger.info("optFlag" + optFlag);
+
+		String accountType="01";
+		if(personalDetail.getDATE_OF_BIRTH()!=null && personalDetail.getDATE_OF_BIRTH()!=""){
+			String st=personalDetail.getDATE_OF_BIRTH();
+			try {
+				LocalDate bd=LocalDate.of(Integer.parseInt(st.substring(4, 8)),Integer.parseInt(st.substring(2, 4)),Integer.parseInt(st.substring(0, 2)));
+				LocalDate cd=LocalDate.now();
+				Period diff=Period.between(bd, cd);
+				logger.info("diiff " + diff.getYears());
+
+				if(optFlag){
+					accountType="04";//otp
+				}else if(diff.getYears()<18){
+					accountType="05";
+				}else if(diff.getYears()==18 && diff.getMonths() ==0  && diff.getDays() == 0){
+					accountType="05";//minor
+				}else {
+					accountType="01";//normal
+				}
+			}catch(Exception e) {
+				logger.info("Exception in Account Type.");
+			}
+		}
+		logger.info("CIF Number"+personalDetail.getCUSTOMER_NUMBER()+"Date of Birth"+personalDetail.getDATE_OF_BIRTH()+"Account Type"+accountType);
+
+		String fatherSpouseFlag = er.getRELATIVE_INDICATOR() == null ? "":er.getRELATIVE_INDICATOR(); //father, spouse or guradian
+		logger.info("fatherSpouseFlag " + fatherSpouseFlag);
+		String customerDetailSql = null;
+
+		String idProofType= personalDetail.getPROOF_OF_ID();
+		String simplifiedType= personalDetail.getSIMPLIFIED();
+		String panNo = "";
+		String AADHARNo = "";
+		if(idProofType.equalsIgnoreCase("C")){
+			panNo = personalDetail.getID_NMUBER();
+		}
+		String ItPan = er.getPAN_NUMBER() == null ? "":er.getPAN_NUMBER();
+		logger.info("ItPan  " + ItPan);
+		if(ItPan==null||ItPan.isEmpty())ItPan=panNo;
+		
+		if(idProofType.equalsIgnoreCase("E")){
+			AADHARNo = personalDetail.getID_NMUBER();
+		}
+		logger.info("id proof type" + idProofType + " " +panNo + " " + AADHARNo);
+
+		//String status = "";
+		//backupCustomerDetail(personalDetail.getKYCNumber());	// take backup of current db data
+		String idNo = personalDetail.getID_NMUBER() != null ? personalDetail.getID_NMUBER() : "";
+		logger.info("id No" + idNo);
+		String CKYCNo = personalDetail.getCKYC_NUMBER()== null ? "":personalDetail.getCKYC_NUMBER().trim();
+		logger.info("CKYC Number1::"+CKYCNo);
+		//String existingCKYCNo = getCKYCNumber(personalDetail.getCIFNumber());
+		String existingCKYCNo = getCKYCNumberU(personalDetail.getCUSTOMER_NUMBER()).trim();//in our DB
+		logger.info("existingCKYCNo " + existingCKYCNo);
+
+		if(CKYCNo.isEmpty() && !existingCKYCNo.isEmpty()){
+			CKYCNo = existingCKYCNo;
+			logger.info("CKYCNo = existingCKYCNo" + CKYCNo);
+		}else if(CKYCNo.length()!=14 || !NumberUtils.isNumber(CKYCNo) ||  CKYCNo.contains(idNo) || StringUtils.countOccurrencesOf(CKYCNo, "0")==CKYCNo.length()){
+			try{
+				String incorrectCKYCNoQuery = "insert into kyc_issue_list (CIF_NUMBER, REPORT_DATE, ISSUE_REMARK, ISSUE_STATUS) values (?,sysdate,?,?)";
+				String remark = "QMS: Wrong CKYC No "+ CKYCNo +" from cbs.";
+				jdbcTemplate.update(incorrectCKYCNoQuery, personalDetail.getCUSTOMER_NUMBER(), remark,"Pending");
+				logger.info("Insertion into table kyc_issue_list sucess for cif: "+ personalDetail.getCUSTOMER_NUMBER() + " and CKYC No: "+CKYCNo);
+			}catch(Exception e){
+				logger.info(e.getMessage());
+				logger.info("Insertion into table kyc_issue_list failed for cif: "+ personalDetail.getCUSTOMER_NUMBER() + " and CKYC No: "+CKYCNo);
+			}
+			CKYCNo = existingCKYCNo;
+
+		}else{
+			logger.info("other case");
+		}
+		logger.info("CKYC Number::"+CKYCNo);
+
+
+
+		String fetchCustomerCount="select count(*) from kycupdate.kyc_customer_details where cif_number='"+personalDetail.getCUSTOMER_NUMBER()+"'";
+		logger.info("fetchCustomerCount  " + fetchCustomerCount);
+		int countInCustomerDetails=0;
+		try {
+			countInCustomerDetails = jdbcTemplate.queryForObject(fetchCustomerCount, Integer.class);
+		}catch(Exception e) {
+			logger.error("Error ",e);
+		}
+
+		logger.info("countInCustomerDetails  " + countInCustomerDetails);
+
+		if(countInCustomerDetails<=0) {
+
+			String customerDetailsInsertQuery = """
+				    INSERT INTO kycupdate.kyc_customer_details (
+				        CIF_NUMBER, RESIDENTIAL_STATUS, APPLICANT_NAME_PREFIX, APPLICANT_FIRST_NAME, APPLICANT_MIDDLE_NAME, APPLICANT_LAST_NAME,
+				        APPLICANT_MAIDEN_NAME_PREFIX, APPLICANT_MAIDEN_FIRST_NAME, APPLICANT_MAIDEN_MIDDLE_NAME, APPLICANT_MAIDEN_LAST_NAME,
+				        MOTHER_NAME_PREFIX, MOTHER_FIRST_NAME, MOTHER_MIDDLE_NAME, MOTHER_LAST_NAME,
+				        DOB, GENDER,
+				        GUARDIAN_NAME_PREFIX, GUARDIAN_FIRST_NAME, GUARDIAN_MIDDLE_NAME, GUARDIAN_LAST_NAME,
+				        NATIONALITY, CITY_OF_BIRTH, COUNTRY_OF_BIRTH, CONSTITUTION_TYPE, ACCOUNT_TYPE, IT_PAN, AADHAR_NUMBER,
+				        MODIFIED_DATE, CKYC_NUMBER, EKYC_NUMBER, ACTUAL_CUSTOMER_TYPE,
+				        SPOUSE_NAME_PREFIX, SPOUSE_FIRST_NAME, SPOUSE_MIDDLE_NAME, SPOUSE_LAST_NAME,
+				        BRANCH_CODE, EKYC_FLAG, FORM_SIXTEEN, TRANSACTIONDATE_FORM60, SUBMISSION_DATE_FORM60,
+				        AGRI_INCOME, OTHER_AGRI_INCOME, VISA_ISSUE_BY, VISA_DETAILS
+				    )
+				    VALUES (
+				        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, to_date(?, 'dd-mm-yyyy'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, sysdate, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+				    )
+				""";
+			int updateFlag = jdbcTemplate.update(customerDetailsInsertQuery, 
+					personalDetail.getCUSTOMER_NUMBER(),
+					cbsToCkycResiStatus(personalDetail.getRESIDENTIAL_STATUS()),
+					getTitle(personalDetail.getNAME_TITLE()),
+					personalDetail.getFIRST_NAME(),
+					personalDetail.getMIDDLE_NAME(),
+					checkLastName(personalDetail.getLAST_NAME()),
+					getTitle(personalDetail.getMAIDEN_NAME_TITLE()),
+					personalDetail.getMAIDEN_FIRST_NAME(),
+					personalDetail.getMAIDEN_MIDDLE_NAME(),
+					checkLastName(personalDetail.getMAIDEN_LAST_NAME()),
+					getTitle(personalDetail.getMOTHER_NAME_TITLE()),
+					personalDetail.getMOTHER_FIRST_NAME(),
+					personalDetail.getMOTHER_MIDDLE_NAME(),
+					checkLastName(personalDetail.getMOTHER_LAST_NAME()),
+					personalDetail.getDATE_OF_BIRTH(),//29
+					personalDetail.getGENDER(),
+					getTitle(personalDetail.getFATHER_NAME_TITLE()),
+					personalDetail.getFATHER_FIRST_NAME(),
+					personalDetail.getFATHER_MIDDLE_NAME(),
+					checkLastName(personalDetail.getFATHER_LAST_NAME()),
+					nationality,
+					er.getCKYC_ADDRESS_DETAILS().getPLACE_CITY_OF_BIRTH(),
+					dobCountry,
+					custType,
+					accountType,
+					ItPan,
+					AADHARNo,
+					CKYCNo,
+					er.getEKYC_CERTIFICATE_NUMBER(),
+					er.getCUSTOMER_TYPE(),
+					getTitle(personalDetail.getSPOUSE_NAME_TITLE()),
+					personalDetail.getSPOUSE_FIRST_NAME(),
+					personalDetail.getSPOUSE_MIDDLE_NAME(),
+					personalDetail.getSPOUSE_LAST_NAME(),
+					personalDetail.getBRANCH_CODE(),
+					personalDetail.getEKYC_FLAG(),
+					FORM60,
+					SUB_DT_FORM60,
+					SUB_DT_FORM60,
+					AGRI_INCOME,
+					OTHER_INCOME,
+					VISA_ISSUE_BY,
+					VISA_DETAIL
+					);
+			logger.info("Inserted rows "+updateFlag);
+		}else {
+			if(backUpFlag){
+
+				logger.info("BRANCH CODE>>>>>>>>>>>API" + personalDetail.getBRANCH_CODE());
+
+				if(fatherSpouseFlag.equalsIgnoreCase("G")){
+					logger.info("fatherSpouseFlag. = G");
+					customerDetailSql ="""
+							UPDATE kyc_customer_details 
+							SET 
+							RESIDENTIAL_STATUS = ?,
+							APPLICANT_NAME_PREFIX = ?,
+							APPLICANT_FIRST_NAME = ?,
+							APPLICANT_MIDDLE_NAME = ?,
+							APPLICANT_LAST_NAME = ?,
+							APPLICANT_MAIDEN_NAME_PREFIX = ?,
+							APPLICANT_MAIDEN_FIRST_NAME = ?,
+							APPLICANT_MAIDEN_MIDDLE_NAME = ?,
+							APPLICANT_MAIDEN_LAST_NAME = ?,
+							MOTHER_NAME_PREFIX = ?,
+							MOTHER_FIRST_NAME = ?,
+							MOTHER_MIDDLE_NAME = ?,
+							MOTHER_LAST_NAME = ?,
+							DOB = to_date(?, 'dd-mm-yyyy'),
+							GENDER = ?,
+							GUARDIAN_NAME_PREFIX = ?,
+							GUARDIAN_FIRST_NAME = ?,
+							GUARDIAN_MIDDLE_NAME = ?,
+							GUARDIAN_LAST_NAME = ?,
+							NATIONALITY = ?,
+							CITY_OF_BIRTH = ?,
+							COUNTRY_OF_BIRTH = ?,
+							CONSTITUTION_TYPE = ?,
+							ACCOUNT_TYPE = ?,
+							IT_PAN = ?,
+							AADHAR_NUMBER = ?,
+							MODIFIED_DATE = sysdate,
+							CKYC_NUMBER = ?,
+							EKYC_NUMBER = ?,
+							ACTUAL_CUSTOMER_TYPE = ?,
+							SPOUSE_NAME_PREFIX = ?,
+							SPOUSE_FIRST_NAME = ?,
+							SPOUSE_MIDDLE_NAME = ?,
+							SPOUSE_LAST_NAME = ?,
+							BRANCH_CODE = ?,
+							EKYC_FLAG = ?,
+							FORM_SIXTEEN = ?,
+							TRANSACTIONDATE_FORM60 = ?,
+							SUBMISSION_DATE_FORM60 = ?,
+							AGRI_INCOME = ?,
+							OTHER_AGRI_INCOME = ?,
+							VISA_ISSUE_BY = ?,
+							VISA_DETAILS = ?,
+							VISA_EXPIRY_DATE = ?,
+							Visa_Issued_Date = ?
+							WHERE 
+							CIF_NUMBER = ?;
+							""";
+
+				}else{
+					logger.info("fatherSpouseFlag. not equal G");
+					customerDetailSql = """
+							UPDATE kyc_customer_details 
+							SET 
+							    RESIDENTIAL_STATUS = ?,
+							    APPLICANT_NAME_PREFIX = ?,
+							    APPLICANT_FIRST_NAME = ?,
+							    APPLICANT_MIDDLE_NAME = ?,
+							    APPLICANT_LAST_NAME = ?,
+							    APPLICANT_MAIDEN_NAME_PREFIX = ?,
+							    APPLICANT_MAIDEN_FIRST_NAME = ?,
+							    APPLICANT_MAIDEN_MIDDLE_NAME = ?,
+							    APPLICANT_MAIDEN_LAST_NAME = ?,
+							    MOTHER_NAME_PREFIX = ?,
+							    MOTHER_FIRST_NAME = ?,
+							    MOTHER_MIDDLE_NAME = ?,
+							    MOTHER_LAST_NAME = ?,
+							    DOB = to_date(?, 'dd-mm-yyyy'),
+							    GENDER = ?,
+							    FATHER_NAME_PREFIX = ?,
+							    FATHER_FIRST_NAME = ?,
+							    FATHER_MIDDLE_NAME = ?,
+							    FATHER_LAST_NAME = ?,
+							    NATIONALITY = ?,
+							    CITY_OF_BIRTH = ?,
+							    COUNTRY_OF_BIRTH = ?,
+							    CONSTITUTION_TYPE = ?,
+							    ACCOUNT_TYPE = ?,
+							    IT_PAN = ?,
+							    AADHAR_NUMBER = ?,
+							    MODIFIED_DATE = sysdate,
+							    CKYC_NUMBER = ?,
+							    EKYC_NUMBER = ?,
+							    ACTUAL_CUSTOMER_TYPE = ?,
+							    SPOUSE_NAME_PREFIX = ?,
+							    SPOUSE_FIRST_NAME = ?,
+							    SPOUSE_MIDDLE_NAME = ?,
+							    SPOUSE_LAST_NAME = ?,
+							    BRANCH_CODE = ?,
+							    EKYC_FLAG = ?,
+							    FORM_SIXTEEN = ?,
+							    TRANSACTIONDATE_FORM60 = ?,
+							    SUBMISSION_DATE_FORM60 = ?,
+							    AGRI_INCOME = ?,
+							    OTHER_AGRI_INCOME = ?,
+							    VISA_ISSUE_BY = ?,
+							    VISA_DETAILS = ?,
+							    VISA_EXPIRY_DATE = ?,
+							    Visa_Issued_Date = ?
+							WHERE 
+							    CIF_NUMBER = ?
+							""";
+				}
+				//--------rm
+
+
+				int updateFlag = 0;
+				int updatePanFlag = 0;
+				String  updatePanInCustomerDetails= "update kyc_customer_details set it_pan=? where cif_number=? ";
+				try {
+
+					updateFlag  = jdbcTemplate.update(customerDetailSql, cbsToCkycResiStatus(personalDetail.getRESIDENTIAL_STATUS()),getTitle(personalDetail.getNAME_TITLE()),
+							personalDetail.getFIRST_NAME(),personalDetail.getMIDDLE_NAME(),checkLastName(personalDetail.getLAST_NAME()),getTitle(personalDetail.getMAIDEN_NAME_TITLE()),
+							personalDetail.getMAIDEN_FIRST_NAME(),personalDetail.getMAIDEN_MIDDLE_NAME(),checkLastName(personalDetail.getMAIDEN_LAST_NAME()),getTitle(personalDetail.getMOTHER_NAME_TITLE()),
+							personalDetail.getMOTHER_FIRST_NAME(),personalDetail.getMOTHER_MIDDLE_NAME(),checkLastName(personalDetail.getMOTHER_LAST_NAME()),personalDetail.getDATE_OF_BIRTH(),
+							personalDetail.getGENDER(),getTitle(personalDetail.getFATHER_NAME_TITLE()),personalDetail.getFATHER_FIRST_NAME(),personalDetail.getFATHER_MIDDLE_NAME(),
+							checkLastName(personalDetail.getFATHER_LAST_NAME()), nationality,er.getCKYC_ADDRESS_DETAILS().getPLACE_CITY_OF_BIRTH() ,dobCountry, custType, accountType, 
+							panNo, AADHARNo, CKYCNo, er.getEKYC_CERTIFICATE_NUMBER(), er.getCUSTOMER_TYPE(), getTitle(personalDetail.getSPOUSE_NAME_TITLE()), personalDetail.getSPOUSE_FIRST_NAME(), 
+							personalDetail.getSPOUSE_MIDDLE_NAME(), personalDetail.getSPOUSE_LAST_NAME(),personalDetail.getBRANCH_CODE(),personalDetail.getEKYC_FLAG(),FORM60,SUB_DT_FORM60,SUB_DT_FORM60,
+							AGRI_INCOME, OTHER_INCOME, VISA_ISSUE_BY, VISA_DETAIL, VISA_EXPIRY_DATE, VISA_ISSUE_DATE,
+							personalDetail.getCUSTOMER_NUMBER()/* ,tempStatus */);
+					logger.info("customerDetailSql :: "+ customerDetailSql);
+					logger.info("update Flag :: "+ updateFlag);
+
+					updatePanFlag = jdbcTemplate.update(updatePanInCustomerDetails, ItPan, personalDetail.getCUSTOMER_NUMBER());
+					logger.info("updatePanInCustomerDetails :: "+ updatePanInCustomerDetails);
+					logger.info("update Flag :: "+ updateFlag);
+					logger.info("updatePanFlag :: "+ updatePanFlag);
+				} catch (DataAccessException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				if(updatePanFlag > 0){
+					logger.info("updatePanFlag  :: "+ "Sucess");
+				}else{
+					logger.info("updatePanFlag  :: "+ "Failed");
+				}
+				if(updateFlag > 0){
+
+					int deleteFlag = deletefromTable("kyc_customer_archive",personalDetail.getCUSTOMER_NUMBER());
+					logger.info("update Flag :: "+ updateFlag);
+					if(deleteFlag >= 0 ){
+						logger.info("deleteFlag Flag :: "+ updateFlag);
+						logger.info("deleteFlag Flag :: "+ updateFlag);
+						insertToTable("kyc_customer_details","kyc_customer_archive",personalDetail.getCUSTOMER_NUMBER());
+					}
+				}
+			}
+		}
+
+
+
+	}
+
+	private boolean cifExist(String cif){
+		String cifExistCutomerDetailQuery = "select count(1) from kyc_customer_details where cif_number=:cifNumber";
+		MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+		mpMapSqlParameterSource.addValue("cifNumber", cif);
+
+		try{
+			int count = namedParameterJdbcTemplate.queryForObject(cifExistCutomerDetailQuery, mpMapSqlParameterSource, Integer.class);
+			if(count > 0){
+				return true;
+			}else{
+				return false;
+			}
+		}catch(Exception e){
+			e.printStackTrace();
+			logger.info("cifExist >>> "+e.getMessage());
+			return false;
+		}
+	}
+
+	private boolean backupCustomerDetailhistory(String cifNo){
+		//String backupCustomerDetailQuery = "insert into kyc_customer_history select cd.*,systimestamp,? from kyc_customer_details cd where cd.CIF_NUMBER=?";
+
+		/*String backupCustomerDetailQuery = "insert into kyc_customer_history select CIF_NUMBER,ACCOUNT_NUMBER,CKYC_NUMBER,APPLICATION_TYPE,IS_ACCOUNT_IN_SBI,BRANCH_CODE," +
+				"WELCOME_KIT_NO,CUSTOMER_TYPE,IS_SENIOR_MINOR,RESIDENTIAL_STATUS,APPLICANT_NAME_PREFIX,"+
+				"APPLICANT_FIRST_NAME,APPLICANT_MIDDLE_NAME,APPLICANT_LAST_NAME,APPLICANT_MAIDEN_NAME_PREFIX,APPLICANT_MAIDEN_FIRST_NAME,APPLICANT_MAIDEN_MIDDLE_NAME,APPLICANT_MAIDEN_LAST_NAME,"+
+				"MOTHER_NAME_PREFIX,MOTHER_FIRST_NAME,MOTHER_MIDDLE_NAME,MOTHER_LAST_NAME,DOB,GENDER,IT_PAN,FORM_SIXTEEN,AADHAR_NUMBER,FATHER_NAME_PREFIX,FATHER_FIRST_NAME,FATHER_MIDDLE_NAME,"+
+				"FATHER_LAST_NAME,SPOUSE_NAME_PREFIX,SPOUSE_FIRST_NAME,SPOUSE_MIDDLE_NAME,SPOUSE_LAST_NAME,GUARDIAN_NAME_PREFIX,GUARDIAN_FIRST_NAME,GUARDIAN_MIDDLE_NAME,GUARDIAN_LAST_NAME,"+
+				"CITY_OF_BIRTH,COUNTRY_OF_BIRTH,NATIONALITY,CONSTITUTION_TYPE,REMARKS_IF_ANY,DATE_OF_INCORPORATION,PLACE_OF_INCORPORATION,IS_MULTIPLE_TAX_RESIDENT,IS_DELETED_UPDATED,"+
+				"BATCH_NUMBER,CPC_CODE,STATUS,ACCOUNT_HOLDER_TYPE_FLAG,ACCOUNT_HOLDER,ACCOUNT_TYPE,MODIFIED_DATE,MAKER_ID,CHECKER_ID,SAVE_STATUS,CKYC_REFERENCE_NUMBER,PRIORITY,"+
+				"COUNTRY_NAME,PRODUCT_CODE,AMMEND_PERSONAL,AMMEND_ADDITIONAL,AMMEND_ADDRESS,AMMEND_RELATED,CHANNEL_ID,systimestamp,?,IS_PRIORITY,IMAGES_UPDATED from kyc_customer_details cd where cd.CIF_NUMBER=?"; //IMAGES_UPDATED added today
+		 */		
+		String backupCustomerDetailQuery = "insert into kyc_customer_history(CIF_NUMBER,ACCOUNT_NUMBER,CKYC_NUMBER,APPLICATION_TYPE,IS_ACCOUNT_IN_SBI,BRANCH_CODE,WELCOME_KIT_NO,CUSTOMER_TYPE,IS_SENIOR_MINOR,RESIDENTIAL_STATUS,APPLICANT_NAME_PREFIX,APPLICANT_FIRST_NAME,APPLICANT_MIDDLE_NAME,APPLICANT_LAST_NAME,APPLICANT_MAIDEN_NAME_PREFIX,APPLICANT_MAIDEN_FIRST_NAME,APPLICANT_MAIDEN_MIDDLE_NAME,APPLICANT_MAIDEN_LAST_NAME,MOTHER_NAME_PREFIX,MOTHER_FIRST_NAME,MOTHER_MIDDLE_NAME,MOTHER_LAST_NAME,DOB,GENDER,IT_PAN,FORM_SIXTEEN,AADHAR_NUMBER,FATHER_NAME_PREFIX,FATHER_FIRST_NAME,FATHER_MIDDLE_NAME,FATHER_LAST_NAME,SPOUSE_NAME_PREFIX,SPOUSE_FIRST_NAME,SPOUSE_MIDDLE_NAME,SPOUSE_LAST_NAME,GUARDIAN_NAME_PREFIX,GUARDIAN_FIRST_NAME,GUARDIAN_MIDDLE_NAME,GUARDIAN_LAST_NAME,CITY_OF_BIRTH,COUNTRY_OF_BIRTH,NATIONALITY,CONSTITUTION_TYPE,REMARKS_IF_ANY,DATE_OF_INCORPORATION,PLACE_OF_INCORPORATION,IS_MULTIPLE_TAX_RESIDENT,IS_DELETED_UPDATED,BATCH_NUMBER,CPC_CODE,STATUS,ACCOUNT_HOLDER_TYPE_FLAG,ACCOUNT_HOLDER,ACCOUNT_TYPE,MODIFIED_DATE,MAKER_ID,CHECKER_ID,SAVE_STATUS,CKYC_REFERENCE_NUMBER,PRIORITY,COUNTRY_NAME,PRODUCT_CODE,AMMEND_PERSONAL,AMMEND_ADDITIONAL,AMMEND_ADDRESS,AMMEND_RELATED,CHANNEL_ID,H_MODIFIED_DATE,H_MODIFIED_BY,IS_PRIORITY,IMAGES_UPDATED,EKYC_NUMBER,CERSAI_NOTIF,APPLICANT_UPDATE_FLAG,PERSONAL_UPDATE_FLAG,ADDRESS_UPDATE_FLAG,CONTACT_UPDATE_FLAG,REMARKS_UPDATE_FLAG,KYC_VERIF_UPDATE_FLAG,IDENTITY_UPDATE_FLAG,RELATED_PER_UPDATE_FLAG,IMAGE_APPROVED_COUNT,SAVE_COMPARE_DATA,SAVE_COMPARE_IMAGE,CERSAI_SUGGESTION,IMAGE_UPDATE_FLAG) "+ 
+
+				"select CIF_NUMBER,ACCOUNT_NUMBER,CKYC_NUMBER,APPLICATION_TYPE,IS_ACCOUNT_IN_SBI,BRANCH_CODE,WELCOME_KIT_NO,CUSTOMER_TYPE,IS_SENIOR_MINOR,RESIDENTIAL_STATUS,APPLICANT_NAME_PREFIX,APPLICANT_FIRST_NAME,APPLICANT_MIDDLE_NAME,APPLICANT_LAST_NAME,APPLICANT_MAIDEN_NAME_PREFIX,APPLICANT_MAIDEN_FIRST_NAME,APPLICANT_MAIDEN_MIDDLE_NAME,APPLICANT_MAIDEN_LAST_NAME,MOTHER_NAME_PREFIX,MOTHER_FIRST_NAME,MOTHER_MIDDLE_NAME,MOTHER_LAST_NAME,DOB,GENDER,IT_PAN,FORM_SIXTEEN,AADHAR_NUMBER,FATHER_NAME_PREFIX,FATHER_FIRST_NAME,FATHER_MIDDLE_NAME,FATHER_LAST_NAME,SPOUSE_NAME_PREFIX,SPOUSE_FIRST_NAME,SPOUSE_MIDDLE_NAME,SPOUSE_LAST_NAME,GUARDIAN_NAME_PREFIX,GUARDIAN_FIRST_NAME,GUARDIAN_MIDDLE_NAME,GUARDIAN_LAST_NAME,CITY_OF_BIRTH,COUNTRY_OF_BIRTH,NATIONALITY,CONSTITUTION_TYPE,REMARKS_IF_ANY,DATE_OF_INCORPORATION,PLACE_OF_INCORPORATION,IS_MULTIPLE_TAX_RESIDENT,IS_DELETED_UPDATED,BATCH_NUMBER,CPC_CODE,STATUS,ACCOUNT_HOLDER_TYPE_FLAG,ACCOUNT_HOLDER,ACCOUNT_TYPE,MODIFIED_DATE,MAKER_ID,CHECKER_ID,SAVE_STATUS,CKYC_REFERENCE_NUMBER,PRIORITY,COUNTRY_NAME,PRODUCT_CODE,AMMEND_PERSONAL,AMMEND_ADDITIONAL,AMMEND_ADDRESS,AMMEND_RELATED,CHANNEL_ID,systimestamp,:modifiedBy,IS_PRIORITY,IMAGES_UPDATED,EKYC_NUMBER,CERSAI_NOTIF,APPLICANT_UPDATE_FLAG,PERSONAL_UPDATE_FLAG,ADDRESS_UPDATE_FLAG,CONTACT_UPDATE_FLAG,REMARKS_UPDATE_FLAG,KYC_VERIF_UPDATE_FLAG,IDENTITY_UPDATE_FLAG,RELATED_PER_UPDATE_FLAG,IMAGE_APPROVED_COUNT,SAVE_COMPARE_DATA,SAVE_COMPARE_IMAGE,CERSAI_SUGGESTION,IMAGE_UPDATE_FLAG from kyc_customer_details cd where cd.CIF_NUMBER=:cifNo";//rm
+
+		logger.info("backupCustomerDetailQuery : "+backupCustomerDetailQuery);
+		try{
+
+			MapSqlParameterSource mp = new MapSqlParameterSource();
+			mp.addValue("modifiedBy", modifiedBy);
+			mp.addValue("cifNo", cifNo);
+			//checker_remark = StringEscapeUtils.unescapeHtml(checker_remark);
+
+			namedParameterJdbcTemplate.update(backupCustomerDetailQuery,mp);
+			logger.info("backupCustomerDetailhistory Sucess");
+			return true;
+		}catch(Exception e){
+			logger.info("backupCustomerDetailhistory >>> "+e.getMessage());
+			return false;
+		}
+	}
+
+	public static String cbsToCkycResiStatus(String cbsResi){
+		String resiStatus = cbsResi;
+		if(cbsResi != null && !cbsResi.equalsIgnoreCase("")){
+			if(resiStatus.equalsIgnoreCase("1")){
+				resiStatus = "01";
+			}else if(resiStatus.equalsIgnoreCase("2")){
+				resiStatus = "02";
+			}else if(resiStatus.equalsIgnoreCase("3")){
+				resiStatus = "01";
+			}else if(resiStatus.equalsIgnoreCase("4")){
+				resiStatus = "01";
+			}else if(resiStatus.equalsIgnoreCase("5")){
+				resiStatus = "03";
+			}else{
+				resiStatus = "04";
+			}
+		}
+		else{
+			resiStatus = "04";
+		}
+		return resiStatus;
+	}
+
+	private String getCKYCNumberU(String cifNumber) {
+		String getCKYCNumberQuery = "select ckyc_number FROM  gcdckyc.ckyc_total_ckyc_gen where cif_number=:cifNumber";
+		MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+		mpMapSqlParameterSource.addValue("cifNumber", cifNumber);
+
+		String CKYCNo = "";
+		try{
+			CKYCNo = namedParameterJdbcTemplate.queryForObject(getCKYCNumberQuery, mpMapSqlParameterSource, String.class);
+		}catch(Exception e){
+			//e.printStackTrace();
+			logger.info("cifExist >>> "+e.getMessage());
+			//return CKYCNo;
+		}
+		return CKYCNo;
+	}
+
+	public String getTitle(String title){//salovation_master
+		if(title.equalsIgnoreCase("01")){
+			title = "MR";
+		}else if(title.equalsIgnoreCase("03")){
+			title = "MS";
+		}else if(title.equalsIgnoreCase("02")){
+			title = "MRS";
+		}else if(title.equalsIgnoreCase("04")){
+			title = "Miss";
+		}else if(title.equalsIgnoreCase("05")) {
+			title = "DR";
+		}else if(title.equalsIgnoreCase("08")) {
+			title = "M/s";
+		}else if(title.equalsIgnoreCase("09")) {
+			title = "Shri";
+		}else if(title.equalsIgnoreCase("22")) {
+			title = "Major";
+		}else if(title.equalsIgnoreCase("50")) {
+			title = "Sepoy";
+		}else if(title.equalsIgnoreCase("52")) {
+			title = "Naik";
+		}else{
+			title = title; //title.substring(0,5);	
+		}
+		return title;
+	}
+
+	public String checkLastName(String lastName){
+		if(lastName.length()==1 && lastName.contains(".")){
+			lastName="";	
+		}
+		return lastName;
+	}
+
+	public int deletefromTable(String toTable,String cifNo){
+		logger.info("----------- Start OF deletefromTable For CHECKER BYPASS ------------------ ");
+		String deleteQuery = "";
+		int deleteFlag = 1;
+		if(toTable.equalsIgnoreCase("kyc_customer_archive")){
+			deleteQuery = "delete from  "+toTable+" where CIF_NUMBER=?";
+		}else{
+			deleteQuery = "delete from  "+toTable+" where CIF_NUMBER_FK=?";
+		}
+		try{
+
+			deleteFlag = jdbcTemplate.update(deleteQuery, cifNo);	
+			System.out.println("deleteFlag:::::::"+deleteFlag);
+		}catch(Exception e){
+			logger.info("Exception occurred while deleting data from table: "+toTable+" Exception is "+e.getMessage());
+		}
+		logger.info("----------- End OF deletefromTable For CHECKER BYPASS ------------------ ");
+		return deleteFlag;
+	}
+
+
+	public void insertToTable(String fromTable,String toTable,String cifNo){
+		logger.info("----------- Start OF insertToTable For CHECKER BYPASS ------------------ ");
+		String insertQuery = "";
+
+		if(fromTable.equalsIgnoreCase("kyc_customer_details")){
+			insertQuery = "insert into "+toTable+" select * from "+fromTable+" where CIF_NUMBER=?";
+			logger.info("insert in query1" );
+		}else{
+			insertQuery = "insert into "+toTable+" select * from "+fromTable+" where CIF_NUMBER_FK=?";
+			logger.info("insert in query2");
+		}
+		try{
+			jdbcTemplate.update(insertQuery, cifNo);
+			logger.info("insert in table sucessfully" );
+		}catch(Exception e){
+			logger.info("Exception occurred for inserting data in table: "+toTable+" Exception is "+e.getMessage());
+		}
+		logger.info("----------- End OF insertToTable For CHECKER BYPASS ------------------ ");
+	}
+
+
+	private void setCustomerAdditionalDetail(CKYC_PERSONAL_DETAILS personalDetail,CKYC_ACCOUNT_DETAILS additionalDetail, String dummyCif) {
+		logger.info("Start of setCustomerAdditionalDetail");
+		/*if(cifExistadditional(personalDetail.getCIFNumber())){
+			backupCustomerAdditionalhistory(personalDetail.getCIFNumber());
+		}*/
+
+		if(!dummyCif.equalsIgnoreCase("")){
+			backupAdditionalDetail(dummyCif); // take backup of current db data
+			String removecustomerAdditionalDetailQuery = "delete from kyc_additional_details where CIF_NUMBER_FK=?";
+			jdbcTemplate.update(removecustomerAdditionalDetailQuery, dummyCif);
+			logger.info("setCustomerAdditionalDetail S1");
+		}
+		String checkCifExist = "select count(*) from kyc_additional_details where CIF_NUMBER_FK=:cifNo";
+		logger.info("checkCifExist " + checkCifExist);
+		MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+		mpMapSqlParameterSource.addValue("cifNo", personalDetail.getCUSTOMER_NUMBER());
+		int cifCount = namedParameterJdbcTemplate.queryForObject(checkCifExist, mpMapSqlParameterSource, Integer.class);
+		String customerAdditionalDetailSql = "";
+		String religion = "";
+		if(additionalDetail.getRELIGION().equalsIgnoreCase("H")){
+			religion = "1";
+		}else if(additionalDetail.getRELIGION().equalsIgnoreCase("M")){
+			religion = "2";
+		}else if(additionalDetail.getRELIGION().equalsIgnoreCase("C")){
+			religion = "3";
+		}else if(additionalDetail.getRELIGION().equalsIgnoreCase("S")){
+			religion = "4";
+		}else{
+			religion = additionalDetail.getRELIGION();
+		}
+
+		logger.info("religion " + religion);
+
+		String occupationType = personalDetail.getOCCUPATION_TYPE();
+		if(occupationType.equalsIgnoreCase("B")){
+			occupationType="B-01";
+		}else if(occupationType.equalsIgnoreCase("O1")){
+			occupationType="O-01";
+		}else if(occupationType.equalsIgnoreCase("O2")){
+			occupationType="O-02";
+		}else if(occupationType.equalsIgnoreCase("O3")){
+			occupationType="O-03";
+		}else if(occupationType.equalsIgnoreCase("O4")){
+			occupationType="O-04";
+		}else if(occupationType.equalsIgnoreCase("O5")){
+			occupationType="O-05";
+		}else if(occupationType.equalsIgnoreCase("S1")){
+			occupationType="S-02";
+		}else if(occupationType.equalsIgnoreCase("S2")){
+			occupationType="S-01";
+		}else if(occupationType.equalsIgnoreCase("S3")){
+			occupationType="S-03";
+		}else{
+			occupationType="X-01";
+		}
+
+		logger.info("occupationType " + occupationType);
+
+		String CBSCategory = additionalDetail.getCATEGORY();
+		if(CBSCategory.equalsIgnoreCase("B")){
+			CBSCategory = "1";
+		}else if(CBSCategory.equalsIgnoreCase("C")){
+			CBSCategory = "2";
+		}else if(CBSCategory.equalsIgnoreCase("T")){
+			CBSCategory = "3";
+		}else if(CBSCategory.equalsIgnoreCase("0")){ // CBSCategory == O is ST for cbs
+			CBSCategory = "4";
+		}else{
+			CBSCategory = "1";
+		}
+
+		logger.info("CBSCategory " + CBSCategory);
+
+		String tickAppl=additionalDetail.getTICK_IF_APPLICABLE();
+		String polExposedflag="";
+		String juriOutIndia="";
+		if(tickAppl.equalsIgnoreCase("01")){
+			polExposedflag="01";
+			juriOutIndia="";
+		}else if(tickAppl.equalsIgnoreCase("02")){
+			polExposedflag="02";
+			juriOutIndia="";
+		}else if(tickAppl==null || tickAppl.equalsIgnoreCase("")){                            //added
+			polExposedflag="";
+			juriOutIndia="";
+		}else{
+			juriOutIndia="03";
+			polExposedflag="";
+		}
+
+		logger.info("tickAppl " + tickAppl + "  polExposedflag " + polExposedflag + "juriOutIndia " + juriOutIndia);
+		int updateFlag =0; 		
+		logger.info("cifCount " + cifCount);
+
+
+		String annual_Income = "";
+		try {
+			// int income = Integer.parseInt(additionalDetail.getANNUAL_INCOME_RS());
+			annual_Income = removeLeadingZeros(additionalDetail.getANNUAL_INCOME());
+
+			logger.info("annual_Income>>>>>>>>>>>>>>" + annual_Income);
+
+		} catch (Exception e) {
+			logger.info("Exception in annual_Income");
+			logger.error(e);
+		}
+
+
+		if (cifCount > 0) {
+			if (backupAdditionalDetail(personalDetail.getCUSTOMER_NUMBER())) {
+				logger.info("update ckycadditional details");// take backup of current db data
+
+				customerAdditionalDetailSql = "update kyc_additional_details set ANNUAL_INCOME=?, NET_WORTH=?, MARITAL_STATUS=?, RELIGION=?, CATEGORY=?, EDU_QUALIFICATION=?, OCCUPATION_TYPE=?, OCCUPATION_SUBTYPE=?,"
+						+ "ORG_NAME=?, DESIGNATION=?, NATURE_OF_BUSINESS=?, POLITICALY_EXPOSED=?, JURIS_OUT_INDIA=?, SOURCE_OF_FUNDSS=?,PLEASE_TICK_IF_APPLICABLE=? where CIF_NUMBER_FK=?";
+				updateFlag = jdbcTemplate.update(customerAdditionalDetailSql, annual_Income,
+						additionalDetail.getNET_WORTH(), personalDetail.getMARITAL_STATUS(), religion, CBSCategory,
+						additionalDetail.getEDUCATION_CODE(), occupationType, personalDetail.getOCCUPATION_SUBTYPE(),
+						additionalDetail.getORGANIZATIONS_NAME(), additionalDetail.getDESIGNATION(),
+						additionalDetail.getNATURE_OF_BUSINESS(), polExposedflag, juriOutIndia,
+						additionalDetail.getSOURCEOFFUNDS(), additionalDetail.getTICK_IF_APPLICABLE(), personalDetail.getCUSTOMER_NUMBER());
+			}
+		} else {
+			logger.info("insert ckycadditional details");
+			customerAdditionalDetailSql = "insert into kyc_additional_details (CIF_NUMBER_FK, ANNUAL_INCOME, NET_WORTH, MARITAL_STATUS, RELIGION, CATEGORY, EDU_QUALIFICATION, OCCUPATION_TYPE, OCCUPATION_SUBTYPE,"
+					+ "ORG_NAME,DESIGNATION, NATURE_OF_BUSINESS, POLITICALY_EXPOSED, JURIS_OUT_INDIA,SOURCE_OF_FUNDSS, PLEASE_TICK_IF_APPLICABLE) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+			updateFlag = jdbcTemplate.update(customerAdditionalDetailSql, personalDetail.getCUSTOMER_NUMBER(),
+					annual_Income, additionalDetail.getNET_WORTH(), personalDetail.getMARITAL_STATUS(), religion,
+					CBSCategory, additionalDetail.getEDUCATION_CODE(), occupationType,
+					personalDetail.getOCCUPATION_SUBTYPE(), additionalDetail.getORGANIZATIONS_NAME(),
+					additionalDetail.getDESIGNATION(), additionalDetail.getNATURE_OF_BUSINESS(), polExposedflag,
+					juriOutIndia, additionalDetail.getSOURCEOFFUNDS(),additionalDetail.getTICK_IF_APPLICABLE());
+		}
+
+		logger.info("update flag " + updateFlag );
+		if(updateFlag > 0){
+			int deleteFlag = deletefromTable("kyc_additional_archive",personalDetail.getCUSTOMER_NUMBER());
+			logger.info("deleteFlag " + deleteFlag);
+			if(deleteFlag >= 0 ){
+				insertToTable("kyc_additional_details","kyc_additional_archive",personalDetail.getCUSTOMER_NUMBER());
+				logger.info("insert table sucessfully");
+			}
+		}
+	}
+
+
+	private boolean backupAdditionalDetail(String cifNo) {
+		try {
+			String backupAdditionalDetailQuery = "insert into kyc_additional_history(CIF_NUMBER_FK, ANNUAL_INCOME, NET_WORTH, MARITAL_STATUS, RELIGION, CATEGORY, EDU_QUALIFICATION, OCCUPATION_TYPE, ORG_NAME,"
+					+ " DESIGNATION, NATURE_OF_BUSINESS, POLITICALY_EXPOSED, JURIS_OUT_INDIA, H_MODIFIED_DATE, H_MODIFIED_BY) "
+					+ " select CIF_NUMBER_FK, ANNUAL_INCOME, NET_WORTH, MARITAL_STATUS, RELIGION, CATEGORY, EDU_QUALIFICATION, OCCUPATION_TYPE, ORG_NAME,DESIGNATION, NATURE_OF_BUSINESS, POLITICALY_EXPOSED, JURIS_OUT_INDIA,systimestamp,? from kyc_additional_details cd where cd.CIF_NUMBER_FK=?";
+
+			jdbcTemplate.update(backupAdditionalDetailQuery, modifiedBy, cifNo);
+			return true;
+		}catch(Exception e){
+			e.printStackTrace();
+			logger.info("backupAdditionalDetail >>> "+e.getMessage());
+			return false;
+		}
+	}
+
+	private String removeLeadingZeros(String value) {
+		if (value == null) {
+			throw new NullPointerException("value is null");
+		}
+		if (value.trim().isEmpty()) {
+			return value;
+		}
+		return value.replaceFirst("^0+(?!$)", "");
+	}
+
+
+	private void setCustomerAddressDetail(CKYC_ADDRESS_DETAILS addr,CKYC_PERSONAL_DETAILS personalDetail,String dummyCif,String channel_id ,String imgtype) 
+	{
+
+		// changes for nonscrutiny start
+		if (channel_id.equalsIgnoreCase("NONSCRUTINY")) {
+			logger.info(" NONSCRUTINY changes start>>>>>>>>"+channel_id);
+			logger.info("Start of setCustomerAddressDetail");
+
+			String checkCifExist = "select count(*) from kyc_address_details where CIF_NUMBER_FK=:cifNo";
+			logger.info("checkCifExist "+ checkCifExist);
+			MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+			mpMapSqlParameterSource.addValue("cifNo", personalDetail.getCUSTOMER_NUMBER());
+			int cifCount = namedParameterJdbcTemplate.queryForObject(checkCifExist, mpMapSqlParameterSource, Integer.class);
+			if(!dummyCif.equalsIgnoreCase("")|| cifCount>0){
+
+				backupAddressDetail(dummyCif);      //take backup of current db data
+				String removeCustomerAddressDetailQuery = "delete from kyc_address_details where CIF_NUMBER_FK=?";
+				jdbcTemplate.update(removeCustomerAddressDetailQuery, dummyCif);
+				logger.info("setCustomerAddressDetail S1");
+			}
+			if(imgtype.equalsIgnoreCase("36")) {
+				addr.setPROOF_OF_ADDRESS("H");
+
+			}else if(imgtype.equalsIgnoreCase("04")){
+				addr.setPROOF_OF_ADDRESS("E");
+			}
+			logger.info(" NONSCRUTINY imgtype>>>>>>>>"+imgtype);
+
+
+			String pervillage = "";
+			String corrCity ="";
+			String corvillage ="";
+			String permVillageCity = nullCheck(addr.getDESCRIPTION()); //!= null && !addr.getVillage().equalsIgnoreCase("") ? addr.getVillage(): addr.getCity();
+			permVillageCity=addr.getCITY_TOWN();
+			logger.info("_____________________________");
+			pervillage = addr.getVILLAGE_TOWN();
+			corrCity =addr.getCITY_CODE();
+			corvillage =addr.getVILLAGE_CODE();
+
+			logger.info("permVillageCity " + addr.getCITY_TOWN());
+			logger.info("pervillage " + addr.getVILLAGE_TOWN());
+			logger.info("corrCity " + addr.getCITY_CODE());
+			logger.info("corvillage " + addr.getVILLAGE_CODE());
+			logger.info("_____________________________");
+			logger.info("permVillageCity " + permVillageCity);
+			logger.info("pervillage " + pervillage);
+			logger.info("corrCity " + corrCity);
+			logger.info("corvillage " + corvillage);
+			String resTel ="";
+			String resTelCode = "";
+			int updateAddressFlag = 0;
+			int updatePermanetAddressFlag = 0;
+			int updateCorrespondAddressFlag = 0;
+			if(personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER() !=null && !personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().equalsIgnoreCase("")){
+				try{
+					if(personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().length()==12){
+						resTelCode = personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().substring(0, 2);
+						resTel = personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().substring(2);					
+					}else if(personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().length()==11){
+						resTelCode = personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().substring(0, 1);
+						resTel = personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().substring(1);				
+					}else if(personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().length()<=10){
+						resTel = personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER();		
+					}else{
+
+					}
+				}catch(Exception e){
+					logger.info("Exception in residency telephone no");
+					logger.error(e);
+				}
+
+			}
+			logger.info("resTel " + resTel);
+			String offTelCode="";
+			String offTel="";
+			if(personalDetail.getOFFICE_TELEPHONE_NUMBER() !=null && !personalDetail.getOFFICE_TELEPHONE_NUMBER().equalsIgnoreCase("")){
+				try{
+					if(personalDetail.getOFFICE_TELEPHONE_NUMBER().length()==12){
+						offTelCode = personalDetail.getOFFICE_TELEPHONE_NUMBER().substring(0, 2);
+						offTel = personalDetail.getOFFICE_TELEPHONE_NUMBER().substring(2);					
+					}else if(personalDetail.getOFFICE_TELEPHONE_NUMBER().length()==11){
+						offTelCode = personalDetail.getOFFICE_TELEPHONE_NUMBER().substring(0, 1);
+						offTel = personalDetail.getOFFICE_TELEPHONE_NUMBER().substring(1);				
+					}else if(personalDetail.getOFFICE_TELEPHONE_NUMBER().length()<=10){
+						offTel = personalDetail.getOFFICE_TELEPHONE_NUMBER();		
+					}else{
+						// do nothing
+					}
+				}catch(Exception e){
+					logger.info("Exception in office telephone no");
+					logger.error(e);
+				}
+
+			}
+			logger.info("offTelCode " + offTelCode + "offTel " + offTel);
+			String faxCode="";
+			String faxNo="";
+			if(personalDetail.getFAX_NUMBER() !=null && !personalDetail.getFAX_NUMBER().equalsIgnoreCase("")){
+				try{
+					if(personalDetail.getFAX_NUMBER().length()==12){
+						faxCode = personalDetail.getFAX_NUMBER().substring(0, 2);
+						faxNo = personalDetail.getFAX_NUMBER().substring(2);
+					}else if(personalDetail.getFAX_NUMBER().length()==11){
+						faxCode = personalDetail.getFAX_NUMBER().substring(0, 1);
+						faxNo = personalDetail.getFAX_NUMBER().substring(1);
+					}else if(personalDetail.getFAX_NUMBER().length()<=10){
+						faxNo = personalDetail.getFAX_NUMBER();
+					}else{
+					}
+
+				}catch(Exception e){
+					logger.info("Exception in fax no");
+					logger.error(e);
+				}
+			}
+
+			logger.info("faxCode " + faxCode + "faxNo" + faxNo);
+
+			HashMap<String, String> MapMobileNo = getMobileNo(personalDetail);
+			String mobileCode=MapMobileNo.containsKey("mobileCode") ? MapMobileNo.get("mobileCode"): "";
+			String mobileNo=MapMobileNo.containsKey("mobileNo") ? MapMobileNo.get("mobileNo") : "";
+
+			logger.info("mobileCode" + mobileCode + "mobileNo " + mobileNo);
+			String districtCode ="";
+			String cordistrictCode ="";
+			String corstateCode="";
+			String corpincode="";
+			String corotherPincode="";
+			backupAddressDetail(addr.getCUSTOMER_NUMBER());      //take backup of current db data
+			removeAddressDataFromTable(addr.getCUSTOMER_NUMBER());
+			if(addr.getDISTRICT() != null && !addr.getDISTRICT().equalsIgnoreCase("")){
+				String District = addr.getDISTRICT().contains(":") ?addr.getDISTRICT().split(":",-1)[0] :addr.getDISTRICT();
+				boolean districtIdFlag = addr.getDISTRICT().contains(":") ? true : false;
+				//districtCode = getDirstrictCodePermanet(District,addr.getSTATE_UT_CODE(),districtIdFlag);
+				districtCode = getDirstrictCodeCorresponding(District,addr.getSTATE_UT_CODE(),true);
+			}else{
+				districtCode = "";
+			}
+
+			logger.info("districtCode  :::  "+districtCode);
+			String stateCode = addr.getSTATE_UT_CODE() == null ? "" :getStateCode(addr.getSTATE_UT_CODE());
+			String pincode = addr.getPOST_CODE() == null ? "" : addr.getPOST_CODE();
+			String otherPincode = "";
+			if(!checkPINCodeExist(stateCode, districtCode, pincode)){
+				otherPincode = pincode;
+				pincode = "Other";
+			}
+			logger.info("districtCode " + districtCode + "stateCode " +stateCode + "pin code "+ pincode + "otherPincode " + otherPincode  );
+			String regularAddressType = addr.getADDRESS_TYPE();
+			if(regularAddressType.equalsIgnoreCase("")){
+				regularAddressType = "01";
+			}
+			logger.info("regularAddressType " + regularAddressType);
+
+			//correspondenceAddressFlag(addr);
+			logger.info("updateAddressFlag " + updateAddressFlag);
+			String corAddressSql = "";
+
+			//Corr address  
+
+			if(addr.getCORRESPONDENCE_ADDRESS_DSTRICT().length()==5 || addr.getCORRESPONDENCE_ADDRESS_DSTRICT().length()==3)
+			{
+
+				cordistrictCode = getDirstrictCodeCorresponding(addr.getCORRESPONDENCE_ADDRESS_DSTRICT(),addr.getCORRESPONDENCE_ADDRESS_STATE_CODE(),true);
+
+			}
+			else if(addr.getCORRESPONDENCE_ADDRESS_DSTRICT().length()>5)
+			{
+				String corcbsDistrict = addr.getCORRESPONDENCE_ADDRESS_DSTRICT().substring(0,4);
+				logger.info("Cbs district code" +corcbsDistrict );
+				cordistrictCode = getDirstrictCodeCorresponding(corcbsDistrict,addr.getCORRESPONDENCE_ADDRESS_STATE_CODE(),true);
+
+			}
+			else
+				cordistrictCode="";
+
+			logger.info("cordistrictCode   " + cordistrictCode);
+
+			corstateCode = getStateCode(addr.getCORRESPONDENCE_ADDRESS_STATE_CODE());
+			corpincode = addr.getCORRESPONDENCE_ADDRESS_PIN_CODE();
+			if(!checkPINCodeExist(corstateCode, cordistrictCode, corpincode)){
+				corotherPincode = corpincode;
+				corpincode = "Other";
+			}
+			logger.info("_____________________________districtCode = "+districtCode);
+			logger.info("_____________________________cordistrictCode = "+cordistrictCode);
+			logger.info("_____________________________corstateCode = "+corstateCode);
+			logger.info("_____________________________stateCode = "+stateCode);
+
+			if (correspondenceAddressFlag(addr).equalsIgnoreCase("Y"))  
+			{
+
+				logger.info(" NONSCRUTINY changes permanent address>>>>>>>>"+channel_id);
+
+				logger.info("_____________|P| = |C|________________1");
+				logger.info("Permannet = Corresponding address");
+				logger.info("____________|< insert perm address >|________________");
+				String perAddressSql = "insert into kyc_address_details(CIF_NUMBER_FK, IS_CURRENT_PERMANENT_OVERSEAS, ADDRESS_TYPE, ADDRESS_LINE_1, ADDRESS_LINE_2, ADDRESS_LINE_3, ADDRESS_CITY_VILLAGE, village, DISTRICT_CODE_FK,"
+						+ "STATE_CODE_FK, SUB_DISTRICT, COUNTRY_CODE_FK, ADDRESS_PIN_CODE,PROOF_OF_ADDRESS, PROOF_OF_ADDRESS_OTHERS, FLAG_JURISDICTION, FLAG_CORRESPONDENCE, FLAG_REGULAR_ADDRESS,"
+						+ "RESI_STD_CODE, RESIDENCE_TELEPHONE_NO, OFFICE_STD_CODE, OFFICE_TELEPHONE_NO, MOBILE_ISD_CODE, MOBILE_NO, FAX_STD_CODE, FAX_NO, EMAIL_ID, OTHER_PINCODE) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+
+				updateCorrespondAddressFlag = jdbcTemplate.update(perAddressSql, addr.getCUSTOMER_NUMBER(), "", regularAddressType, removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_1()), removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_2()), removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_3()), 
+						permVillageCity,pervillage, cordistrictCode, corstateCode, addr.getCOR_SUB_DISTRICT() , addr.getCORRESPONDENCE_ADDRESS_COUNTRY_CODE(), corpincode, 
+						cbsToCKYCAddressProof(addr.getPROOF_OF_ADDRESS()), "", "X", "X", "R", resTelCode, resTel, offTelCode, offTel, mobileCode, mobileNo, faxCode, faxNo, personalDetail.getEMAIL_ID(),corotherPincode);
+				logger.info("corAddressSql : "  + perAddressSql);
+
+				logger.info("__________|< UPDATE CORR.ADDRESS >|_____________");
+				corAddressSql = "update kyc_address_details set FLAG_CORRESPONDENCE='CO' where CIF_NUMBER_FK=? AND FLAG_REGULAR_ADDRESS='R'";
+				updateAddressFlag = jdbcTemplate.update(corAddressSql,addr.getCUSTOMER_NUMBER());
+				logger.info("corAddressSql query: " + corAddressSql);
+
+
+			}else{
+				logger.info(" NONSCRUTINY changes coor address>>>>>>>>"+channel_id);
+
+				logger.info("_____________|P| != |C|________________2");
+				if(addr.getADDRESS_LINE_1() != null && !addr.getADDRESS_LINE_1().equalsIgnoreCase("")){
+					logger.info("_____________|addr.getADDRESS_LINE_1() != null|________________2.1");
+					logger.info("______|<Permanent and Corresponding address are different>|__________");
+
+
+
+					String perAddressSql = "insert into kyc_address_details(CIF_NUMBER_FK, IS_CURRENT_PERMANENT_OVERSEAS, ADDRESS_TYPE, ADDRESS_LINE_1, ADDRESS_LINE_2, ADDRESS_LINE_3, ADDRESS_CITY_VILLAGE, village, DISTRICT_CODE_FK,"
+							+ "STATE_CODE_FK, SUB_DISTRICT, COUNTRY_CODE_FK, ADDRESS_PIN_CODE,PROOF_OF_ADDRESS, PROOF_OF_ADDRESS_OTHERS, FLAG_JURISDICTION, FLAG_CORRESPONDENCE, FLAG_REGULAR_ADDRESS,"
+							+ "RESI_STD_CODE, RESIDENCE_TELEPHONE_NO, OFFICE_STD_CODE, OFFICE_TELEPHONE_NO, MOBILE_ISD_CODE, MOBILE_NO, FAX_STD_CODE, FAX_NO, EMAIL_ID, OTHER_PINCODE) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+
+					updateCorrespondAddressFlag = jdbcTemplate.update(perAddressSql, addr.getCUSTOMER_NUMBER(), "", regularAddressType, removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_1()), removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_2()), removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_3()), 
+							permVillageCity,pervillage, cordistrictCode, corstateCode, addr.getCOR_SUB_DISTRICT() , addr.getCORRESPONDENCE_ADDRESS_COUNTRY_CODE(), corpincode, 
+							cbsToCKYCAddressProof(addr.getPROOF_OF_ADDRESS()), "", "X", "CO", "R", resTelCode, resTel, offTelCode, offTel, mobileCode, mobileNo, faxCode, faxNo, personalDetail.getEMAIL_ID(),corotherPincode);
+					logger.info("corAddressSql : "  + perAddressSql);
+
+					corAddressSql = "insert into kyc_address_details(CIF_NUMBER_FK,IS_CURRENT_PERMANENT_OVERSEAS,ADDRESS_TYPE,ADDRESS_LINE_1,ADDRESS_LINE_2,ADDRESS_LINE_3,ADDRESS_CITY_VILLAGE,village,DISTRICT_CODE_FK,"
+							+ "STATE_CODE_FK,SUB_DISTRICT,COUNTRY_CODE_FK,ADDRESS_PIN_CODE,PROOF_OF_ADDRESS,PROOF_OF_ADDRESS_OTHERS,FLAG_JURISDICTION,FLAG_CORRESPONDENCE,FLAG_REGULAR_ADDRESS,OTHER_PINCODE) " +
+							"values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+					updatePermanetAddressFlag = jdbcTemplate.update(corAddressSql, addr.getCUSTOMER_NUMBER(), "", "01", removeDoubleOrMoreSpaces(addr.getADDRESS_LINE_1()), removeDoubleOrMoreSpaces(addr.getADDRESS_LINE_2()), 
+							removeDoubleOrMoreSpaces(addr.getADDRESS_LINE_3()), corrCity,corvillage, districtCode, stateCode,addr.getSUB_DISTRICT() , addr.getCOUNTRY_CODE(), 
+							pincode,"", "", "X", "X", "X",otherPincode);	
+					logger.info("insert into corAddressSql "  + corAddressSql);
+
+				}else{
+					logger.info("______________|addr.getADDRESS_LINE_1() = null|_______________2.2");
+
+					String perAddressSql = "insert into kyc_address_details(CIF_NUMBER_FK,IS_CURRENT_PERMANENT_OVERSEAS,ADDRESS_TYPE,ADDRESS_LINE_1,ADDRESS_LINE_2,ADDRESS_LINE_3,ADDRESS_CITY_VILLAGE,village,DISTRICT_CODE_FK,"
+							+ "STATE_CODE_FK,SUB_DISTRICT,COUNTRY_CODE_FK,ADDRESS_PIN_CODE,PROOF_OF_ADDRESS,PROOF_OF_ADDRESS_OTHERS,FLAG_JURISDICTION,FLAG_CORRESPONDENCE,FLAG_REGULAR_ADDRESS,"
+							+ "RESI_STD_CODE,RESIDENCE_TELEPHONE_NO,OFFICE_STD_CODE,OFFICE_TELEPHONE_NO,MOBILE_ISD_CODE,MOBILE_NO,FAX_STD_CODE,FAX_NO,EMAIL_ID,OTHER_PINCODE) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+
+
+					updateCorrespondAddressFlag = jdbcTemplate.update(perAddressSql, addr.getCUSTOMER_NUMBER(), "", regularAddressType, removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_1()), removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_2()), removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_3()), 
+							permVillageCity,pervillage, cordistrictCode, corstateCode, addr.getSUB_DISTRICT(), addr.getCORRESPONDENCE_ADDRESS_COUNTRY_CODE(), corpincode, 
+							cbsToCKYCAddressProof(addr.getPROOF_OF_ADDRESS()), "", "X", "CO", "R", resTelCode, resTel, offTelCode, offTel, mobileCode, mobileNo, faxCode, faxNo, personalDetail.getEMAIL_ID(),corotherPincode);
+					logger.info("insert into PerAddressSql : "  + perAddressSql);
+
+					corAddressSql = "insert into kyc_address_details(CIF_NUMBER_FK,IS_CURRENT_PERMANENT_OVERSEAS,ADDRESS_TYPE,ADDRESS_LINE_1,ADDRESS_LINE_2,ADDRESS_LINE_3,ADDRESS_CITY_VILLAGE,village,DISTRICT_CODE_FK,"
+							+ "STATE_CODE_FK,SUB_DISTRICT,COUNTRY_CODE_FK,ADDRESS_PIN_CODE,PROOF_OF_ADDRESS,PROOF_OF_ADDRESS_OTHERS,FLAG_JURISDICTION,FLAG_CORRESPONDENCE,FLAG_REGULAR_ADDRESS,OTHER_PINCODE) " +
+							"values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+					updatePermanetAddressFlag = jdbcTemplate.update(corAddressSql, addr.getCUSTOMER_NUMBER(), "", "01", removeDoubleOrMoreSpaces(addr.getADDRESS_LINE_1()), removeDoubleOrMoreSpaces(addr.getADDRESS_LINE_2()), 
+							removeDoubleOrMoreSpaces(addr.getADDRESS_LINE_3()),permVillageCity,pervillage, districtCode, stateCode,"", addr.getCOUNTRY_CODE(), 
+							pincode,"", "", "X", "X", "X",otherPincode);	
+
+
+					logger.info("corAddressSql : " + corAddressSql);
+				}
+
+			}
+			logger.info("updateAddressFlag " + updateAddressFlag);
+
+			/* Insert Jurisdiction Address */
+			String juriAddressSql = "";
+			String juriAddressType=getAddressTypeValue(addr);
+			logger.info("juriAddressType " + juriAddressType);
+			if(juriAddressType != null){
+				if(juriAddressType.equalsIgnoreCase("P")){
+					corAddressSql = "update kyc_address_details set FLAG_JURISDICTION='J' where CIF_NUMBER_FK=? AND FLAG_REGULAR_ADDRESS='R'";
+					updateAddressFlag = jdbcTemplate.update(corAddressSql,addr.getCUSTOMER_NUMBER());
+				}else if(juriAddressType.equalsIgnoreCase("C")){
+					corAddressSql = "update kyc_address_details set FLAG_JURISDICTION='J' where CIF_NUMBER_FK=? AND FLAG_CORRESPONDENCE='CO'";
+					updateAddressFlag = jdbcTemplate.update(corAddressSql,addr.getCUSTOMER_NUMBER());
+				}else{
+					if(!addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_1().equalsIgnoreCase("")){
+						stateCode = getStateCode(addr.getJURISDICTION_OUTSIDE_INDIA_STATE_UT_CODE());
+						juriAddressSql = "insert into kyc_address_details(CIF_NUMBER_FK,IS_CURRENT_PERMANENT_OVERSEAS,ADDRESS_TYPE,ADDRESS_LINE_1,ADDRESS_LINE_2,ADDRESS_LINE_3,ADDRESS_CITY_VILLAGE,"
+								+ "STATE_CODE_FK,COUNTRY_CODE_FK,ADDRESS_PIN_CODE,FLAG_JURISDICTION,FLAG_CORRESPONDENCE,FLAG_REGULAR_ADDRESS) values(?,?,?,?,?,?,?,?,?,?,?,?,?)";
+						updateAddressFlag = jdbcTemplate.update(juriAddressSql, addr.getCUSTOMER_NUMBER(), juriAddressType, "", removeDoubleOrMoreSpaces(addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_1()), removeDoubleOrMoreSpaces(addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_2()),
+								removeDoubleOrMoreSpaces(addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_3()), addr.getJURISDICTION_OUTSIDE_INDIA_CITY_TOWN(), stateCode, addr.getJURISDICTION_OUTSIDE_INDIA_COUNTRY_CODE(), addr.getJURISDICTION_OUTSIDE_INDIA_POST_CODE(),"J", "X", "X");
+					}
+				}
+				logger.info("updateAddressFlag " + updateAddressFlag);
+			}
+
+			if(updateAddressFlag > 0){
+				int deleteFlag = deletefromTable("kyc_address_archive",addr.getCUSTOMER_NUMBER());
+				if(deleteFlag >= 0 ){
+					insertToTable("kyc_address_details","kyc_address_archive",addr.getCUSTOMER_NUMBER());
+				}
+				logger.info("delete flag "+ deleteFlag);
+			}
+
+
+			backupTaxDetail(addr.getCUSTOMER_NUMBER());
+			int updateMultipleTaxFlag=0;
+			if(addr.getTAX_IDENTIFICATION_NUMBER_OR_EQUIVALENT() != null){
+				if(multipuleTaxPresent(addr.getCUSTOMER_NUMBER())){
+					logger.info("update");
+					String updateTaxQuery = "update kyc_multiple_tax_residency set TIN_1=?, TIN_1_ISSUING_COUNTRY=?,COUNTRY_1_TAX_RESI_PURPOSE=?," +
+							"TIN_2=?,TIN_2_ISSUING_COUNTRY=?,COUNTRY_2_TAX_RESI_PURPOSE=?,MULTIPLE_TAX_RESI_ID=? where CIF_NUMBER_FK=?";
+					//backupTaxDetail(addr.getCIFNumber());    //take backup of current db data
+					updateMultipleTaxFlag = jdbcTemplate.update(updateTaxQuery, addr.getTAX_IDENTIFICATION_NUMBER_OR_EQUIVALENT(), addr.getCOUNTRY_CODE(), addr.getJURISDICTION_OUTSIDE_INDIA_COUNTRY_CODE(), "", "","" ,"", addr.getCUSTOMER_NUMBER());
+					logger.info("updateTaxQuery" + updateTaxQuery);
+				}else{
+					removeMultipleTaxDataFromTable(addr.getCUSTOMER_NUMBER());
+					String taxQuery = "insert into kyc_multiple_tax_residency (CIF_NUMBER_FK,TIN_1,TIN_1_ISSUING_COUNTRY,COUNTRY_1_TAX_RESI_PURPOSE) values (?,?,?,?)";
+					updateMultipleTaxFlag = jdbcTemplate.update(taxQuery, addr.getCUSTOMER_NUMBER(), addr.getTAX_IDENTIFICATION_NUMBER_OR_EQUIVALENT(), addr.getCOUNTRY_CODE(),addr.getJURISDICTION_OUTSIDE_INDIA_COUNTRY_CODE());
+					logger.info("updateTaxQuery" + taxQuery);
+				}
+				if(updateMultipleTaxFlag > 0){
+					int deleteFlag = deletefromTable("kyc_multiple_tax_res_archive",addr.getCUSTOMER_NUMBER());
+					if(deleteFlag >= 0 ){
+						insertToTable("kyc_multiple_tax_residency","kyc_multiple_tax_res_archive",addr.getCUSTOMER_NUMBER());
+					}
+					logger.info("deleteFlag" + deleteFlag);
+				}
+			}else{
+				removeMultipleTaxDataFromTable(addr.getCUSTOMER_NUMBER());
+				String taxQuery = "insert into kyc_multiple_tax_residency (CIF_NUMBER_FK, MULTIPLE_TAX_RESI_ID) values (?,?)";
+				updateMultipleTaxFlag = jdbcTemplate.update(taxQuery, addr.getCUSTOMER_NUMBER(), "111");
+				if(updateMultipleTaxFlag > 0){
+					int deleteFlag = deletefromTable("kyc_multiple_tax_res_archive",addr.getCUSTOMER_NUMBER());
+					if(deleteFlag >= 0 ){
+						insertToTable("kyc_multiple_tax_residency","kyc_multiple_tax_res_archive",addr.getCUSTOMER_NUMBER());
+					}
+					logger.info("deleteFlag" + deleteFlag);
+				}
+				logger.info("updateTaxQuery" + taxQuery);
+			}
+			logger.info("updateMultipleTaxFlag " + updateMultipleTaxFlag);
+		}
+		// changes for nonscrutiny end
+
+		//		+++++++++++++++++++++++++++Normal addresss start+++++++++++++++++++++++++++++++++++++++
+
+
+		else {
+			logger.info("Start of setCustomerAddressDetail");
+			logger.info(" Normal changes start>>>>>>>>"+channel_id);
+
+			String checkCifExist = "select count(*) from kyc_address_details where CIF_NUMBER_FK=:cifNo";
+			logger.info("checkCifExist "+ checkCifExist);
+			MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+			mpMapSqlParameterSource.addValue("cifNo", personalDetail.getCUSTOMER_NUMBER());
+			int cifCount = namedParameterJdbcTemplate.queryForObject(checkCifExist, mpMapSqlParameterSource, Integer.class);
+			if(!dummyCif.equalsIgnoreCase("")|| cifCount>0){
+
+				backupAddressDetail(dummyCif);      //take backup of current db data
+				String removeCustomerAddressDetailQuery = "delete from kyc_address_details where CIF_NUMBER_FK=?";
+				jdbcTemplate.update(removeCustomerAddressDetailQuery, dummyCif);
+				logger.info("setCustomerAddressDetail S1");
+			}
+			String pervillage = "";
+			String corrCity ="";
+			String corvillage ="";
+			String permVillageCity = nullCheck(addr.getDESCRIPTION()); //!= null && !addr.getVillage().equalsIgnoreCase("") ? addr.getVillage(): addr.getCity();
+			permVillageCity=addr.getCITY_TOWN();
+			logger.info("_____________________________");
+			pervillage = addr.getVILLAGE_TOWN();
+			corrCity =addr.getCITY_CODE();
+			corvillage =addr.getVILLAGE_CODE();
+
+			logger.info("permVillageCity " + addr.getCITY_TOWN());
+			logger.info("pervillage " + addr.getVILLAGE_TOWN());
+			logger.info("corrCity " + addr.getCITY_CODE());
+			logger.info("corvillage " + addr.getVILLAGE_CODE());
+			logger.info("_____________________________");
+			logger.info("permVillageCity " + permVillageCity);
+			logger.info("pervillage " + pervillage);
+			logger.info("corrCity " + corrCity);
+			logger.info("corvillage " + corvillage);
+			String resTel ="";
+			String resTelCode = "";
+			int updateAddressFlag = 0;
+			int updatePermanetAddressFlag = 0;
+			int updateCorrespondAddressFlag = 0;
+			if(personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER() !=null && !personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().equalsIgnoreCase("")){
+				try{
+					if(personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().length()==12){
+						resTelCode = personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().substring(0, 2);
+						resTel = personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().substring(2);					
+					}else if(personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().length()==11){
+						resTelCode = personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().substring(0, 1);
+						resTel = personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().substring(1);				
+					}else if(personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER().length()<=10){
+						resTel = personalDetail.getRESIDENTIAL_TELEPHONE_NUMBER();		
+					}else{
+						// do nothing
+					}
+				}catch(Exception e){
+					logger.info("Exception in residency telephone no");
+					logger.error(e);
+				}
+
+			}
+			logger.info("resTel " + resTel);
+			String offTelCode="";
+			String offTel="";
+			if(personalDetail.getOFFICE_TELEPHONE_NUMBER() !=null && !personalDetail.getOFFICE_TELEPHONE_NUMBER().equalsIgnoreCase("")){
+				try{
+					if(personalDetail.getOFFICE_TELEPHONE_NUMBER().length()==12){
+						offTelCode = personalDetail.getOFFICE_TELEPHONE_NUMBER().substring(0, 2);
+						offTel = personalDetail.getOFFICE_TELEPHONE_NUMBER().substring(2);					
+					}else if(personalDetail.getOFFICE_TELEPHONE_NUMBER().length()==11){
+						offTelCode = personalDetail.getOFFICE_TELEPHONE_NUMBER().substring(0, 1);
+						offTel = personalDetail.getOFFICE_TELEPHONE_NUMBER().substring(1);				
+					}else if(personalDetail.getOFFICE_TELEPHONE_NUMBER().length()<=10){
+						offTel = personalDetail.getOFFICE_TELEPHONE_NUMBER();		
+					}else{
+						// do nothing
+					}
+				}catch(Exception e){
+					logger.info("Exception in office telephone no");
+					logger.error(e);
+				}
+
+			}
+			logger.info("offTelCode " + offTelCode + "offTel " + offTel);
+			String faxCode="";
+			String faxNo="";
+			if(personalDetail.getFAX_NUMBER() !=null && !personalDetail.getFAX_NUMBER().equalsIgnoreCase("")){
+				try{
+					if(personalDetail.getFAX_NUMBER().length()==12){
+						faxCode = personalDetail.getFAX_NUMBER().substring(0, 2);
+						faxNo = personalDetail.getFAX_NUMBER().substring(2);
+					}else if(personalDetail.getFAX_NUMBER().length()==11){
+						faxCode = personalDetail.getFAX_NUMBER().substring(0, 1);
+						faxNo = personalDetail.getFAX_NUMBER().substring(1);
+					}else if(personalDetail.getFAX_NUMBER().length()<=10){
+						faxNo = personalDetail.getFAX_NUMBER();
+					}else{
+					}
+
+				}catch(Exception e){
+					logger.info("Exception in fax no");
+					logger.error(e);
+				}
+
+			}
+
+			logger.info("faxCode " + faxCode + "faxNo" + faxNo);
+
+			HashMap<String, String> MapMobileNo = getMobileNo(personalDetail);
+			String mobileCode=MapMobileNo.containsKey("mobileCode") ? MapMobileNo.get("mobileCode"): "";
+			String mobileNo=MapMobileNo.containsKey("mobileNo") ? MapMobileNo.get("mobileNo") : "";
+
+			logger.info("mobileCode" + mobileCode + "mobileNo " + mobileNo);
+			String districtCode ="";
+			String cordistrictCode ="";
+			String corstateCode="";
+			String corpincode="";
+			String corotherPincode="";
+			backupAddressDetail(addr.getCUSTOMER_NUMBER());      //take backup of current db data
+			removeAddressDataFromTable(addr.getCUSTOMER_NUMBER());
+			if(addr.getDISTRICT() != null && !addr.getDISTRICT().equalsIgnoreCase("")){
+				String District = addr.getDISTRICT().contains(":") ?addr.getDISTRICT().split(":",-1)[0] :addr.getDISTRICT();
+				boolean districtIdFlag = addr.getDISTRICT().contains(":") ? true : false;
+				//districtCode = getDirstrictCodePermanet(District,addr.getSTATE_UT_CODE(),districtIdFlag);
+				districtCode = getDirstrictCodeCorresponding(District,addr.getSTATE_UT_CODE(),true);
+			}else{
+				districtCode = "";
+			}
+
+			logger.info("districtCode  :::  "+districtCode);
+			String stateCode = addr.getSTATE_UT_CODE() == null ? "" :getStateCode(addr.getSTATE_UT_CODE());
+			String pincode = addr.getPOST_CODE() == null ? "" : addr.getPOST_CODE();
+			String otherPincode = "";
+			if(!checkPINCodeExist(stateCode, districtCode, pincode)){
+				otherPincode = pincode;
+				pincode = "Other";
+			}
+			logger.info("districtCode " + districtCode + "stateCode " +stateCode + "pin code "+ pincode + "otherPincode " + otherPincode  );
+			String regularAddressType = addr.getADDRESS_TYPE();
+			if(regularAddressType.equalsIgnoreCase("")){
+				regularAddressType = "01";
+			}
+			logger.info("regularAddressType " + regularAddressType);
+
+			//correspondenceAddressFlag(addr);
+			logger.info("updateAddressFlag " + updateAddressFlag);
+			String corAddressSql = "";
+
+			//Corr address  
+
+			if(addr.getCORRESPONDENCE_ADDRESS_DSTRICT().length()==5 || addr.getCORRESPONDENCE_ADDRESS_DSTRICT().length()==3)
+			{
+
+				cordistrictCode = getDirstrictCodeCorresponding(addr.getCORRESPONDENCE_ADDRESS_DSTRICT(),addr.getCORRESPONDENCE_ADDRESS_STATE_CODE(),true);
+
+			}
+			else if(addr.getCORRESPONDENCE_ADDRESS_DSTRICT().length()>5)
+			{
+				String corcbsDistrict = addr.getCORRESPONDENCE_ADDRESS_DSTRICT().substring(0,4);
+				logger.info("Cbs district code" +corcbsDistrict );
+				cordistrictCode = getDirstrictCodeCorresponding(corcbsDistrict,addr.getCORRESPONDENCE_ADDRESS_STATE_CODE(),true);
+
+			}
+			else
+				cordistrictCode="";
+
+			logger.info("cordistrictCode   " + cordistrictCode);
+
+			corstateCode = getStateCode(addr.getCORRESPONDENCE_ADDRESS_STATE_CODE());
+			corpincode = addr.getCORRESPONDENCE_ADDRESS_PIN_CODE();
+			if(!checkPINCodeExist(corstateCode, cordistrictCode, corpincode)){
+				corotherPincode = corpincode;
+				corpincode = "Other";
+			}
+			logger.info("_____________________________districtCode = "+districtCode);
+			logger.info("_____________________________cordistrictCode = "+cordistrictCode);
+			logger.info("_____________________________corstateCode = "+corstateCode);
+			logger.info("_____________________________stateCode = "+stateCode);
+
+			if (correspondenceAddressFlag(addr).equalsIgnoreCase("Y"))  
+			{
+				logger.info(" normal changes permanent address>>>>>>>>"+channel_id);
+				logger.info("_____________|P| = |C|________________1");
+				logger.info("Permannet = Corresponding address");
+				logger.info("____________|< insert perm address >|________________");
+				String perAddressSql = "insert into kyc_address_details(CIF_NUMBER_FK, IS_CURRENT_PERMANENT_OVERSEAS, ADDRESS_TYPE, ADDRESS_LINE_1, ADDRESS_LINE_2, ADDRESS_LINE_3, ADDRESS_CITY_VILLAGE, village, DISTRICT_CODE_FK,"
+						+ "STATE_CODE_FK, SUB_DISTRICT, COUNTRY_CODE_FK, ADDRESS_PIN_CODE,PROOF_OF_ADDRESS, PROOF_OF_ADDRESS_OTHERS, FLAG_JURISDICTION, FLAG_CORRESPONDENCE, FLAG_REGULAR_ADDRESS,"
+						+ "RESI_STD_CODE, RESIDENCE_TELEPHONE_NO, OFFICE_STD_CODE, OFFICE_TELEPHONE_NO, MOBILE_ISD_CODE, MOBILE_NO, FAX_STD_CODE, FAX_NO, EMAIL_ID, OTHER_PINCODE) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+
+				updateCorrespondAddressFlag = jdbcTemplate.update(perAddressSql, addr.getCUSTOMER_NUMBER(), "", regularAddressType, removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_1()), removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_2()), removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_3()), 
+						permVillageCity,pervillage, cordistrictCode, corstateCode, addr.getCOR_SUB_DISTRICT() , addr.getCORRESPONDENCE_ADDRESS_COUNTRY_CODE(), corpincode, 
+						cbsToCKYCAddressProof(addr.getPROOF_OF_ADDRESS()), "", "X", "X", "R", resTelCode, resTel, offTelCode, offTel, mobileCode, mobileNo, faxCode, faxNo, personalDetail.getEMAIL_ID(),corotherPincode);
+				logger.info("corAddressSql : "  + perAddressSql);
+
+				logger.info("__________|< UPDATE CORR.ADDRESS >|_____________");
+				corAddressSql = "update kyc_address_details set FLAG_CORRESPONDENCE='CO' where CIF_NUMBER_FK=? AND FLAG_REGULAR_ADDRESS='R'";
+				updateAddressFlag = jdbcTemplate.update(corAddressSql,addr.getCUSTOMER_NUMBER());
+				logger.info("corAddressSql query: " + corAddressSql);
+
+
+			}else{
+				logger.info(" normal changes coor address>>>>>>>>"+channel_id);
+				logger.info("_____________|P| != |C|________________2");
+				if(addr.getADDRESS_LINE_1() != null && !addr.getADDRESS_LINE_1().equalsIgnoreCase("")){
+					logger.info("_____________|addr.getADDRESS_LINE_1() != null|________________2.1");
+					logger.info("______|<Permanent and Corresponding address are different>|__________");
+
+
+
+					String perAddressSql = "insert into kyc_address_details(CIF_NUMBER_FK, IS_CURRENT_PERMANENT_OVERSEAS, ADDRESS_TYPE, ADDRESS_LINE_1, ADDRESS_LINE_2, ADDRESS_LINE_3, ADDRESS_CITY_VILLAGE, village, DISTRICT_CODE_FK,"
+							+ "STATE_CODE_FK, SUB_DISTRICT, COUNTRY_CODE_FK, ADDRESS_PIN_CODE,PROOF_OF_ADDRESS, PROOF_OF_ADDRESS_OTHERS, FLAG_JURISDICTION, FLAG_CORRESPONDENCE, FLAG_REGULAR_ADDRESS,"
+							+ "RESI_STD_CODE, RESIDENCE_TELEPHONE_NO, OFFICE_STD_CODE, OFFICE_TELEPHONE_NO, MOBILE_ISD_CODE, MOBILE_NO, FAX_STD_CODE, FAX_NO, EMAIL_ID, OTHER_PINCODE) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+
+					updateCorrespondAddressFlag = jdbcTemplate.update(perAddressSql, addr.getCUSTOMER_NUMBER(), "", regularAddressType, removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_1()), removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_2()), removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_3()), 
+							permVillageCity,pervillage, cordistrictCode, corstateCode, addr.getCOR_SUB_DISTRICT() , addr.getCORRESPONDENCE_ADDRESS_COUNTRY_CODE(), corpincode, 
+							cbsToCKYCAddressProof(addr.getPROOF_OF_ADDRESS()), "", "X", "X", "R", resTelCode, resTel, offTelCode, offTel, mobileCode, mobileNo, faxCode, faxNo, personalDetail.getEMAIL_ID(),corotherPincode);
+					logger.info("corAddressSql : "  + perAddressSql);
+
+					corAddressSql = "insert into kyc_address_details(CIF_NUMBER_FK,IS_CURRENT_PERMANENT_OVERSEAS,ADDRESS_TYPE,ADDRESS_LINE_1,ADDRESS_LINE_2,ADDRESS_LINE_3,ADDRESS_CITY_VILLAGE,village,DISTRICT_CODE_FK,"
+							+ "STATE_CODE_FK,SUB_DISTRICT,COUNTRY_CODE_FK,ADDRESS_PIN_CODE,PROOF_OF_ADDRESS,PROOF_OF_ADDRESS_OTHERS,FLAG_JURISDICTION,FLAG_CORRESPONDENCE,FLAG_REGULAR_ADDRESS,OTHER_PINCODE) " +
+							"values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+					updatePermanetAddressFlag = jdbcTemplate.update(corAddressSql, addr.getCUSTOMER_NUMBER(), "", "01", removeDoubleOrMoreSpaces(addr.getADDRESS_LINE_1()), removeDoubleOrMoreSpaces(addr.getADDRESS_LINE_2()), 
+							removeDoubleOrMoreSpaces(addr.getADDRESS_LINE_3()), corrCity,corvillage, districtCode, stateCode,addr.getSUB_DISTRICT() , addr.getCOUNTRY_CODE(), 
+							pincode,"", "", "X", "CO", "X",otherPincode);	
+					logger.info("insert into corAddressSql "  + corAddressSql);
+
+				}else{
+					logger.info("______________|addr.getADDRESS_LINE_1() = null|_______________2.2");
+
+					String perAddressSql = "insert into kyc_address_details(CIF_NUMBER_FK,IS_CURRENT_PERMANENT_OVERSEAS,ADDRESS_TYPE,ADDRESS_LINE_1,ADDRESS_LINE_2,ADDRESS_LINE_3,ADDRESS_CITY_VILLAGE,village,DISTRICT_CODE_FK,"
+							+ "STATE_CODE_FK,SUB_DISTRICT,COUNTRY_CODE_FK,ADDRESS_PIN_CODE,PROOF_OF_ADDRESS,PROOF_OF_ADDRESS_OTHERS,FLAG_JURISDICTION,FLAG_CORRESPONDENCE,FLAG_REGULAR_ADDRESS,"
+							+ "RESI_STD_CODE,RESIDENCE_TELEPHONE_NO,OFFICE_STD_CODE,OFFICE_TELEPHONE_NO,MOBILE_ISD_CODE,MOBILE_NO,FAX_STD_CODE,FAX_NO,EMAIL_ID,OTHER_PINCODE) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+
+
+					updateCorrespondAddressFlag = jdbcTemplate.update(perAddressSql, addr.getCUSTOMER_NUMBER(), "", regularAddressType, removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_1()), removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_2()), removeDoubleOrMoreSpaces(addr.getCORRESPONDENCE_ADDRESS_LINE_3()), 
+							permVillageCity,pervillage, cordistrictCode, corstateCode, addr.getSUB_DISTRICT(), addr.getCORRESPONDENCE_ADDRESS_COUNTRY_CODE(), corpincode, 
+							cbsToCKYCAddressProof(addr.getPROOF_OF_ADDRESS()), "", "X", "X", "R", resTelCode, resTel, offTelCode, offTel, mobileCode, mobileNo, faxCode, faxNo, personalDetail.getEMAIL_ID(),corotherPincode);
+					logger.info("insert into PerAddressSql : "  + perAddressSql);
+
+					corAddressSql = "insert into kyc_address_details(CIF_NUMBER_FK,IS_CURRENT_PERMANENT_OVERSEAS,ADDRESS_TYPE,ADDRESS_LINE_1,ADDRESS_LINE_2,ADDRESS_LINE_3,ADDRESS_CITY_VILLAGE,village,DISTRICT_CODE_FK,"
+							+ "STATE_CODE_FK,SUB_DISTRICT,COUNTRY_CODE_FK,ADDRESS_PIN_CODE,PROOF_OF_ADDRESS,PROOF_OF_ADDRESS_OTHERS,FLAG_JURISDICTION,FLAG_CORRESPONDENCE,FLAG_REGULAR_ADDRESS,OTHER_PINCODE) " +
+							"values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+					updatePermanetAddressFlag = jdbcTemplate.update(corAddressSql, addr.getCUSTOMER_NUMBER(), "", "01", removeDoubleOrMoreSpaces(addr.getADDRESS_LINE_1()), removeDoubleOrMoreSpaces(addr.getADDRESS_LINE_2()), 
+							removeDoubleOrMoreSpaces(addr.getADDRESS_LINE_3()),permVillageCity,pervillage, districtCode, stateCode,"", addr.getCOUNTRY_CODE(), 
+							pincode,"", "", "X", "CO", "X",otherPincode);	
+
+
+					logger.info("corAddressSql : " + corAddressSql);
+				}
+
+			}
+			logger.info("updateAddressFlag " + updateAddressFlag);
+
+			/* Insert Jurisdiction Address */
+			String juriAddressSql = "";
+			String juriAddressType=getAddressTypeValue(addr);
+			logger.info("juriAddressType " + juriAddressType);
+			if(juriAddressType != null){
+				if(juriAddressType.equalsIgnoreCase("P")){
+					corAddressSql = "update kyc_address_details set FLAG_JURISDICTION='J' where CIF_NUMBER_FK=? AND FLAG_REGULAR_ADDRESS='R'";
+					updateAddressFlag = jdbcTemplate.update(corAddressSql,addr.getCUSTOMER_NUMBER());
+				}else if(juriAddressType.equalsIgnoreCase("C")){
+					corAddressSql = "update kyc_address_details set FLAG_JURISDICTION='J' where CIF_NUMBER_FK=? AND FLAG_CORRESPONDENCE='CO'";
+					updateAddressFlag = jdbcTemplate.update(corAddressSql,addr.getCUSTOMER_NUMBER());
+				}else{
+					if(!addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_1().equalsIgnoreCase("")){
+						stateCode = getStateCode(addr.getJURISDICTION_OUTSIDE_INDIA_STATE_UT_CODE());
+						juriAddressSql = "insert into kyc_address_details(CIF_NUMBER_FK,IS_CURRENT_PERMANENT_OVERSEAS,ADDRESS_TYPE,ADDRESS_LINE_1,ADDRESS_LINE_2,ADDRESS_LINE_3,ADDRESS_CITY_VILLAGE,"
+								+ "STATE_CODE_FK,COUNTRY_CODE_FK,ADDRESS_PIN_CODE,FLAG_JURISDICTION,FLAG_CORRESPONDENCE,FLAG_REGULAR_ADDRESS) values(?,?,?,?,?,?,?,?,?,?,?,?,?)";
+						updateAddressFlag = jdbcTemplate.update(juriAddressSql, addr.getCUSTOMER_NUMBER(), juriAddressType, "", removeDoubleOrMoreSpaces(addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_1()), removeDoubleOrMoreSpaces(addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_2()),
+								removeDoubleOrMoreSpaces(addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_3()), addr.getJURISDICTION_OUTSIDE_INDIA_CITY_TOWN(), stateCode, addr.getJURISDICTION_OUTSIDE_INDIA_COUNTRY_CODE(), addr.getJURISDICTION_OUTSIDE_INDIA_POST_CODE(),"J", "X", "X");
+					}
+				}
+				logger.info("updateAddressFlag " + updateAddressFlag);
+			}
+
+			if(updateAddressFlag > 0){
+				int deleteFlag = deletefromTable("kyc_address_archive",addr.getCUSTOMER_NUMBER());
+				if(deleteFlag >= 0 ){
+					insertToTable("kyc_address_details","kyc_address_archive",addr.getCUSTOMER_NUMBER());
+				}
+				logger.info("delete flag "+ deleteFlag);
+			}
+
+
+			backupTaxDetail(addr.getCUSTOMER_NUMBER());
+			int updateMultipleTaxFlag=0;
+			if(addr.getTAX_IDENTIFICATION_NUMBER_OR_EQUIVALENT() != null){
+				if(multipuleTaxPresent(addr.getCUSTOMER_NUMBER())){
+					logger.info("update");
+					String updateTaxQuery = "update kyc_multiple_tax_residency set TIN_1=?, TIN_1_ISSUING_COUNTRY=?,COUNTRY_1_TAX_RESI_PURPOSE=?," +
+							"TIN_2=?,TIN_2_ISSUING_COUNTRY=?,COUNTRY_2_TAX_RESI_PURPOSE=?,MULTIPLE_TAX_RESI_ID=? where CIF_NUMBER_FK=?";
+					//backupTaxDetail(addr.getCIFNumber());    //take backup of current db data
+					updateMultipleTaxFlag = jdbcTemplate.update(updateTaxQuery, addr.getTAX_IDENTIFICATION_NUMBER_OR_EQUIVALENT(), addr.getCOUNTRY_CODE(), addr.getJURISDICTION_OUTSIDE_INDIA_COUNTRY_CODE(), "", "","" ,"", addr.getCUSTOMER_NUMBER());
+					logger.info("updateTaxQuery" + updateTaxQuery);
+				}else{
+					removeMultipleTaxDataFromTable(addr.getCUSTOMER_NUMBER());
+					String taxQuery = "insert into kyc_multiple_tax_residency (CIF_NUMBER_FK,TIN_1,TIN_1_ISSUING_COUNTRY,COUNTRY_1_TAX_RESI_PURPOSE) values (?,?,?,?)";
+					updateMultipleTaxFlag = jdbcTemplate.update(taxQuery, addr.getCUSTOMER_NUMBER(), addr.getTAX_IDENTIFICATION_NUMBER_OR_EQUIVALENT(), addr.getCOUNTRY_CODE(),addr.getJURISDICTION_OUTSIDE_INDIA_COUNTRY_CODE());
+					logger.info("updateTaxQuery" + taxQuery);
+				}
+				if(updateMultipleTaxFlag > 0){
+					int deleteFlag = deletefromTable("kyc_multiple_tax_res_archive",addr.getCUSTOMER_NUMBER());
+					if(deleteFlag >= 0 ){
+						insertToTable("kyc_multiple_tax_residency","kyc_multiple_tax_res_archive",addr.getCUSTOMER_NUMBER());
+					}
+					logger.info("deleteFlag" + deleteFlag);
+				}
+			}else{
+				removeMultipleTaxDataFromTable(addr.getCUSTOMER_NUMBER());
+				String taxQuery = "insert into kyc_multiple_tax_residency (CIF_NUMBER_FK, MULTIPLE_TAX_RESI_ID) values (?,?)";
+				updateMultipleTaxFlag = jdbcTemplate.update(taxQuery, addr.getCUSTOMER_NUMBER(), "111");
+				if(updateMultipleTaxFlag > 0){
+					int deleteFlag = deletefromTable("kyc_multiple_tax_res_archive",addr.getCUSTOMER_NUMBER());
+					if(deleteFlag >= 0 ){
+						insertToTable("kyc_multiple_tax_residency","kyc_multiple_tax_res_archive",addr.getCUSTOMER_NUMBER());
+					}
+					logger.info("deleteFlag" + deleteFlag);
+				}
+				logger.info("updateTaxQuery" + taxQuery);
+			}
+			logger.info("updateMultipleTaxFlag " + updateMultipleTaxFlag);
+		}	
+	}
+
+	private void backupAddressDetail(String cifNo){
+
+		String backupAddressDetailQuery = "insert into kyc_address_history(CIF_NUMBER_FK,IS_CURRENT_PERMANENT_OVERSEAS,ADDRESS_TYPE,ADDRESS_LINE_1,ADDRESS_LINE_2,ADDRESS_LINE_3,ADDRESS_CITY_VILLAGE,DISTRICT_CODE_FK,"
+				+ "STATE_CODE_FK,SUB_DISTRICT,COUNTRY_CODE_FK,ADDRESS_PIN_CODE,PROOF_OF_ADDRESS,PROOF_OF_ADDRESS_OTHERS,FLAG_JURISDICTION,FLAG_CORRESPONDENCE,FLAG_REGULAR_ADDRESS,"
+				+ "RESI_STD_CODE,RESIDENCE_TELEPHONE_NO,OFFICE_STD_CODE,OFFICE_TELEPHONE_NO,MOBILE_ISD_CODE,MOBILE_NO,FAX_STD_CODE,FAX_NO,EMAIL_ID,OTHER_PINCODE, H_MODIFIED_DATE, H_MODIFIED_BY) "
+				+ " select CIF_NUMBER_FK,IS_CURRENT_PERMANENT_OVERSEAS,ADDRESS_TYPE,ADDRESS_LINE_1,ADDRESS_LINE_2,ADDRESS_LINE_3,ADDRESS_CITY_VILLAGE,DISTRICT_CODE_FK,"
+				+ "STATE_CODE_FK,SUB_DISTRICT,COUNTRY_CODE_FK,ADDRESS_PIN_CODE,PROOF_OF_ADDRESS,PROOF_OF_ADDRESS_OTHERS,FLAG_JURISDICTION,FLAG_CORRESPONDENCE,FLAG_REGULAR_ADDRESS,"
+				+ "RESI_STD_CODE,RESIDENCE_TELEPHONE_NO,OFFICE_STD_CODE,OFFICE_TELEPHONE_NO,MOBILE_ISD_CODE,MOBILE_NO,FAX_STD_CODE,FAX_NO,EMAIL_ID,OTHER_PINCODE,systimestamp,? from kyc_address_details cd where cd.CIF_NUMBER_FK=?";
+		jdbcTemplate.update(backupAddressDetailQuery, modifiedBy, cifNo);
+
+	}
+
+	public HashMap<String, String> getMobileNo(CKYC_PERSONAL_DETAILS personalDetail){
+		HashMap<String, String> mobileCodeNoMap = new HashMap<String, String>();
+		if(personalDetail.getMOBILE_NUMBER() !=null && !personalDetail.getMOBILE_NUMBER().equalsIgnoreCase("")){
+			try{
+				if(personalDetail.getMOBILE_NUMBER().length()==12){
+					mobileCodeNoMap.put("mobileCode", personalDetail.getMOBILE_NUMBER().substring(0, 2));
+					mobileCodeNoMap.put("mobileNo", personalDetail.getMOBILE_NUMBER().substring(2));
+				}else if(personalDetail.getMOBILE_NUMBER().length()==11){
+					mobileCodeNoMap.put("mobileCode", personalDetail.getMOBILE_NUMBER().substring(0, 1));
+					mobileCodeNoMap.put("mobileNo", personalDetail.getMOBILE_NUMBER().substring(1));
+				}else if(personalDetail.getMOBILE_NUMBER().length()<=10){
+					mobileCodeNoMap.put("mobileNo", personalDetail.getMOBILE_NUMBER());
+				}else{
+					// do nothing
+				}
+				return mobileCodeNoMap;
+			}catch(Exception e){
+				logger.info("Exception in fax no");
+				logger.error(e);
+				return mobileCodeNoMap;
+			}
+		}
+
+		return mobileCodeNoMap;
+	}
+
+	private void removeAddressDataFromTable(String cifNumber) {
+		String deleteSql = "delete from kyc_address_details where cif_number_fk=?";
+		try{
+			jdbcTemplate.update(deleteSql,cifNumber);
+		}catch(Exception e){
+			logger.info(e.getMessage());
+		}
+	}
+
+
+	private String getDirstrictCodeCorresponding(String cbsDistrictId, String cbsStateCode, boolean districtIdFlag){
+		String dristrictCodeSql="";
+		String districtId;
+		try{
+			logger.info("__________________________________________________> "+ cbsStateCode+""+cbsDistrictId);
+			if(districtIdFlag){ // district id present
+				dristrictCodeSql = "select CKYC_DISTRICT_ID_FK FROM  gcdckyc.KYC_cbs_district where CBS_DISTRICT_ID=:cbsDistrictId";
+				MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+				mpMapSqlParameterSource.addValue("cbsDistrictId", cbsStateCode+""+cbsDistrictId); 
+				//mpMapSqlParameterSource.addValue("cbsDistrictId",cbsDistrictId);
+				logger.info("cbsStateCode " +  cbsStateCode);
+				logger.info("cbsDistrictId " +  cbsDistrictId);
+				logger.info("Combination getDistrictcode" + (cbsStateCode+""+cbsDistrictId));
+				districtId = namedParameterJdbcTemplate.queryForObject(dristrictCodeSql, mpMapSqlParameterSource, String.class);
+
+			}else{ // district name is present
+				dristrictCodeSql = "select CKYC_DISTRICT_ID_FK FROM  gcdckyc.KYC_cbs_district where CBS_DISTRICT_NAME=:cbsDistrictName";
+				MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+				mpMapSqlParameterSource.addValue("cbsDistrictName", cbsDistrictId);
+				districtId = namedParameterJdbcTemplate.queryForObject(dristrictCodeSql, mpMapSqlParameterSource, String.class);
+			}
+
+		}catch(Exception e){
+			logger.info("getDirstrictCode >>> "+e.getMessage());
+			districtId="";
+			try {
+				dristrictCodeSql = "select CKYC_DISTRICT_ID_FK FROM  gcdckyc.KYC_cbs_district where CKYC_DISTRICT_ID_FK=:cbsDistrictName";
+				MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+				mpMapSqlParameterSource.addValue("cbsDistrictName", cbsDistrictId);
+				districtId = namedParameterJdbcTemplate.queryForObject(dristrictCodeSql, mpMapSqlParameterSource, String.class);
+			}catch(Exception e1){
+				logger.info("getDirstrictCode >>> "+e1.getMessage());
+				districtId="";
+
+			}
+			logger.info("__________________________________________________> "+ districtId);
+		}
+		logger.info("dristrictCodeSql : "+dristrictCodeSql);
+		logger.info("cbsDistrictId : "+cbsDistrictId);
+		return districtId;
+	}
+
+	private String getStateCode(String sId){
+
+		String stateCodeSql = "select state_code FROM  gcdckyc.ckyc_state where state_id=:stateId";
+		MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+		//		String stateId = sId.length()==2 && sId.indexOf("0")==0 ?  sId.substring(1) : sId;
+		String stateId =  sId;
+		logger.info("stateID___________ :" + stateId);
+		mpMapSqlParameterSource.addValue("stateId", stateId);
+		String stateCode = "";
+		try{
+			stateCode = namedParameterJdbcTemplate.queryForObject(stateCodeSql, mpMapSqlParameterSource, String.class);
+		}catch(Exception e){
+			e.printStackTrace();
+			logger.info("getStateCode >>>>> "+e.getMessage());
+		}
+
+		logger.info("stateCode___________ :" + stateCode);
+		return stateCode;
+	}
+
+
+
+	public boolean checkPINCodeExist(String state, String district, String pincode){
+		logger.info(">>>>>>>>>>>>> Inside checkPINCodeExist method <<<<<<<<< ");
+		String pinExistQuery = "select count(1) FROM  gcdckyc.kyc_district where state_code=:state AND district_id=:district AND pincode=:pincode";
+		MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+		mpMapSqlParameterSource.addValue("state", state);
+		mpMapSqlParameterSource.addValue("district", district);
+		mpMapSqlParameterSource.addValue("pincode", pincode);
+		try{
+
+			int count = namedParameterJdbcTemplate.queryForObject(pinExistQuery, mpMapSqlParameterSource, Integer.class);
+			if(count > 0){
+				logger.info(">>>>>>>>>>>>> End of checkPINCodeExist method <<<<<<<<< ");
+				return true;
+			}else{
+				logger.info(">>>>>>>>>>>>> End of checkPINCodeExist method <<<<<<<<< ");
+				return false;
+			}
+		}catch(Exception e){
+			e.printStackTrace();
+			logger.info(e.getMessage());
+			logger.info(">>>>>>>>>>>>> End of checkPINCodeExist method <<<<<<<<< ");
+			return false;
+		}
+	}
+
+	private String correspondenceAddressFlag(CKYC_ADDRESS_DETAILS address){
+		String flag = "N";
+		try{
+			if(CompareData(address.getADDRESS_LINE_1(),address.getCORRESPONDENCE_ADDRESS_LINE_1())
+					&& CompareData(address.getADDRESS_LINE_2(),address.getCORRESPONDENCE_ADDRESS_LINE_2())
+					&&CompareData(address.getADDRESS_LINE_3(),address.getCORRESPONDENCE_ADDRESS_LINE_3()) 
+					&& CompareData(address.getPOST_CODE(),address.getCORRESPONDENCE_ADDRESS_PIN_CODE()) /*&& CompareData(address.getState(),address.getCorrespondantState()) */){
+				flag = "Y";
+			}
+		}catch(Exception e){
+			logger.info(e.getMessage());
+		}
+
+		return flag;
+	}
+
+	public boolean CompareData(String a, String b){
+		if(a != null && b != null){
+			return a.equalsIgnoreCase(b);
+		}
+		return false;
+	}
+
+	public String removeDoubleOrMoreSpaces(String inputStr){
+		if(inputStr != null){
+			return inputStr.replaceAll("\\s{2,}", " ").replaceAll("\\\"+", "");
+		}else{
+			return inputStr;
+		}
+	}
+
+	private String cbsToCKYCAddressProof(String addressProof){
+		String ckycAddressProof="";
+		if(addressProof.equalsIgnoreCase("A")){
+			ckycAddressProof="02";
+		}else if(addressProof.equalsIgnoreCase("B")){
+			ckycAddressProof="04";
+		}else if(addressProof.equalsIgnoreCase("C")){
+			ckycAddressProof="";
+		}else if(addressProof.equalsIgnoreCase("D")){
+			ckycAddressProof="03";
+		}else if(addressProof.equalsIgnoreCase("E")){
+			ckycAddressProof="01";
+		}else if(addressProof.equalsIgnoreCase("F")){
+			ckycAddressProof="05";
+		}else if(addressProof.equalsIgnoreCase("Z")){
+			ckycAddressProof="99";
+		}else if(addressProof.equalsIgnoreCase("S")){
+			ckycAddressProof="S";
+		}else if(addressProof.equalsIgnoreCase("H")){
+			ckycAddressProof="09";
+		}else {
+			ckycAddressProof=addressProof;
+		}
+
+		logger.info("ckycAddressProof : "+ckycAddressProof);
+		return ckycAddressProof;
+	}
+
+
+	public String getAddressTypeValue(CKYC_ADDRESS_DETAILS addr) {
+		String result = "";
+		try{
+			if(CompareData(addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_1(),addr.getADDRESS_LINE_1()) && CompareData(addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_2(),addr.getADDRESS_LINE_2())&&
+					CompareData(addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_3(),addr.getADDRESS_LINE_3()) && /*CompareData(address.getState(),address.getCorrespondantState()) &&*/
+					CompareData(addr.getJURISDICTION_OUTSIDE_INDIA_POST_CODE(),addr.getPOST_CODE()) ){
+				result = "P";
+			}
+			else if(CompareData(addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_1(),addr.getCORRESPONDENCE_ADDRESS_LINE_1()) && CompareData(addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_2(),addr.getCORRESPONDENCE_ADDRESS_LINE_2())&&
+					CompareData(addr.getJURISDICTION_OUTSIDE_INDIA_ADDRESS_LINE_3(),addr.getCORRESPONDENCE_ADDRESS_LINE_3()) && /*CompareData(address.getState(),address.getCorrespondantState()) &&*/
+					CompareData(addr.getJURISDICTION_OUTSIDE_INDIA_POST_CODE(),addr.getCORRESPONDENCE_ADDRESS_PIN_CODE()) ){
+				result = "C";
+			}else {
+				result = "";
+			}
+		}catch(Exception e){
+			logger.info(e.getMessage());
+		}
+		logger.info("get Address type value " + result);
+		return result;
+	}
+
+	private void backupTaxDetail(String cifNo){
+
+		String backupTaxDetailQuery = "insert into kyc_tax_history(CIF_NUMBER_FK, TIN_1, TIN_1_ISSUING_COUNTRY, COUNTRY_1_TAX_RESI_PURPOSE, TIN_2, TIN_2_ISSUING_COUNTRY, " +
+				"COUNTRY_2_TAX_RESI_PURPOSE, MULTIPLE_TAX_RESI_ID, H_MODIFIED_DATE, H_MODIFIED_BY) " +
+				"select CIF_NUMBER_FK, TIN_1, TIN_1_ISSUING_COUNTRY, COUNTRY_1_TAX_RESI_PURPOSE, TIN_2, TIN_2_ISSUING_COUNTRY, COUNTRY_2_TAX_RESI_PURPOSE, " +
+				"MULTIPLE_TAX_RESI_ID, systimestamp,? from kyc_multiple_tax_residency cd where cd.CIF_NUMBER_FK=?";
+		jdbcTemplate.update(backupTaxDetailQuery, modifiedBy, cifNo);
+		logger.info("backupTaxDetail" + backupTaxDetailQuery );
+	}
+
+	private boolean multipuleTaxPresent(String cif){
+		String cifExistQuery = "select count(*) from kyc_multiple_tax_residency where CIF_NUMBER_FK=:cifNumber";
+		MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+		mpMapSqlParameterSource.addValue("cifNumber", cif);
+		try{
+
+			int count = namedParameterJdbcTemplate.queryForObject(cifExistQuery, mpMapSqlParameterSource, Integer.class);
+			if(count > 0){
+				return true;
+			}else{
+				return false;
+			}
+		}catch(Exception e){
+			return false;
+		}
+	}
+
+	private void removeMultipleTaxDataFromTable(String cifNumber) {
+		String deleteSql = "delete from kyc_multiple_tax_residency where cif_number_fk=?";
+		try{
+
+			jdbcTemplate.update(deleteSql,cifNumber);
+		}catch(Exception e){
+			logger.info(e.getMessage());
+		}
+	}
+
+
+
+	private void setCustomerRelatedPersonDetail(CKYC_RELATED_PERSON_DETAILS er,String dummyCif) 
+	{
+		/*if(cifExistrelated(er.getCIFNumber())){
+			backupCustomerRelatedhistory(er.getCIFNumber());
+		}*/
+
+		logger.info("setCustomerRelatedPersonDetail start");
+		logger.info("dummyCif "+ dummyCif);
+		if(!dummyCif.equalsIgnoreCase("")){
+			backupRelatedPersonDetail(dummyCif);      //take backup of current db data
+			String removeCustomerRelatedPersonQuery = "delete from kyc_related_person where CIF_NUMBER_FK=?";
+			jdbcTemplate.update(removeCustomerRelatedPersonQuery, dummyCif);
+			logger.info("setCustomerRelatedPersonDetail S1");
+		}
+		String relatedPersonDetailSql = "insert into kyc_related_person (CIF_NUMBER_FK, IS_DELETED, PERSON_TYPE, PERSON_KYC_NO, PREFIX, FIRSTNAME, MIDNAME, LASTNAME, "
+				+ "IDENTIFICATION_TYPE, IDENTITY_NUMBER, OTHER_PROOF_NAME, EXPIRY_DATE, ISSUED_BY, ISSUED_AT, ISSUED_DATE, REL_SEQ_NO) "
+				+ " values (?,?,?,?,?,?,?,?,?,?,?,to_Date(?,'dd-mm-yyyy'),?,?,to_Date(?,'dd-mm-yyyy'),?)";
+
+		/*String relatedPersonDetailUpdateSql = "update kyc_related_person set PERSON_KYC_NO=?, PREFIX=?, FIRSTNAME=?, MIDNAME=?, LASTNAME=?, IDENTIFICATION_TYPE=?," +
+											"IDENTITY_NUMBER=?, OTHER_PROOF_NAME=?, EXPIRY_DATE=to_Date(?,'dd-mm-yyyy'), ISSUED_BY=?, ISSUED_AT=?, ISSUED_DATE=to_Date(?,'dd-mm-yyyy'), REL_SEQ_NO=?  " +
+											"where CIF_NUMBER_FK=? AND PERSON_TYPE=?";*/
+		backupRelatedPersonDetail(er.getCUSTOMER_NUMBER()); 
+		removeRelatedPersonDataFromTable(er.getCUSTOMER_NUMBER());
+		logger.info("Customer number " + er.getCUSTOMER_NUMBER());
+		int updateRelatedpersonFlag = 0; 
+		if(er.getFIRST_RELATED_PERSON_FIRST_NAME() != null && !er.getFIRST_RELATED_PERSON_FIRST_NAME().equalsIgnoreCase("")){
+			String idProofType = er.getFIRST_RELATED_PERSON_PROOF_OF_ID() != null ? er.getFIRST_RELATED_PERSON_PROOF_OF_ID() : "" ;
+			String expDate = "";
+			if(idProofType.equalsIgnoreCase("A")){
+				expDate = er.getFIRST_RELATED_PERSON_PASSPORT_EXPIRY_DATE();
+			}else if(idProofType.equalsIgnoreCase("D")){
+				expDate = er.getFIRST_RELATED_PERSON_DRIVING_LICENSE_EXPIRY_DATE();
+			}else if(idProofType.equalsIgnoreCase("S")){
+				idProofType = "S"+er.getFIRST_RELATED_PERSON_SIMPLIFIED();
+			}else{
+				expDate = "";
+			}
+			String issueDate1="";
+
+			logger.info("idproof type " + idProofType );
+			logger.info("expDate " + expDate);
+
+			String relType1 = er.getRELATED_PERSON_TYPE_FIRST()==null ? "" : relatedPersonType(er.getRELATED_PERSON_TYPE_FIRST());
+			logger.info("relType1 " + relType1);
+			if(er.getFIRST_RELATED_PERSON_ID_ISSUED_DATE().length()==8)
+				issueDate1 = er.getFIRST_RELATED_PERSON_ID_ISSUED_DATE().equalsIgnoreCase("00000000") || er.getRELATED_PERSON_TYPE_FIRST() == null ? "": er.getFIRST_RELATED_PERSON_ID_ISSUED_DATE();
+			else
+				issueDate1="";	
+			logger.info("issueDate1 " + issueDate1);
+			logger.info("er.getFIRST_RELATED_PERSON_CKYC_NUMBER() " + er.getFIRST_RELATED_PERSON_CKYC_NUMBER());
+			logger.info("get title" + getTitle(er.getFIRST_RELATED_PERSON_TITLE()));
+			logger.info("Last name"+checkLastName(er.getFIRST_RELATED_PERSON_LAST_NAME()));
+			logger.info("Id issued at" +er.getFIRST_RELATED_PERSON_ID_ISSUED_AT());
+			logger.info("id issued by " + er.getFIRST_RELATED_PERSON_ID_ISSUED_BY());
+			logger.info("id number" +  er.getFIRST_RELATED_PERSON_ID_NUMBER());
+			logger.info("others " +er.getFIRST_RELATED_PERSON_OTHERS());
+			logger.info("er.getFIRST_RELATED_PERSON_MIDDLE_NAME() " + er.getFIRST_RELATED_PERSON_MIDDLE_NAME() );
+			logger.info(" er.getFIRST_RELATED_PERSON_FIRST_NAME() " +  er.getFIRST_RELATED_PERSON_FIRST_NAME());
+
+			updateRelatedpersonFlag = jdbcTemplate.update(relatedPersonDetailSql, er.getCUSTOMER_NUMBER(),
+					"",relType1, er.getFIRST_RELATED_PERSON_CKYC_NUMBER(),getTitle(er.getFIRST_RELATED_PERSON_TITLE()), 
+					er.getFIRST_RELATED_PERSON_FIRST_NAME(),er.getFIRST_RELATED_PERSON_MIDDLE_NAME(),
+					checkLastName(er.getFIRST_RELATED_PERSON_LAST_NAME()),idProofType, er.getFIRST_RELATED_PERSON_ID_NUMBER(),
+					er.getFIRST_RELATED_PERSON_OTHERS(), expDate,er.getFIRST_RELATED_PERSON_ID_ISSUED_BY(),
+					er.getFIRST_RELATED_PERSON_ID_ISSUED_AT(),issueDate1,"1");
+
+		}
+
+		logger.info("updateRelatedpersonFlag " + updateRelatedpersonFlag);
+		if (er.getSECOND_RELATED_PERSON_FIRST_NAME() != null && !er.getSECOND_RELATED_PERSON_FIRST_NAME().equalsIgnoreCase("")) 
+		{
+			String idProofType2 = er.getSECOND_RELATED_PERSON_PROOF_OF_ID() != null ? er.getSECOND_RELATED_PERSON_PROOF_OF_ID() : "" ;
+			String expDate2 = "";
+			if(idProofType2.equalsIgnoreCase("A")){
+				expDate2 = er.getSECOND_RELATED_PERSON_PASSPORT_EXPIRY_DATE();
+			}else if(idProofType2.equalsIgnoreCase("D")){
+				expDate2 = er.getSECOND_RELATED_PERSON_DRIVING_LICENSE_EXPIRY_DATE();
+			}else if(idProofType2.equalsIgnoreCase("S")){
+				idProofType2 = "S"+er.getSECOND_RELATED_PERSON_SIMPLIFIED();
+			}else{
+				expDate2 = "";
+			}
+			String issueDate2 ="";
+			String relType2 = er.getRELATED_PERSON_TYPE_SECOND()==null ? "" :relatedPersonType(er.getRELATED_PERSON_TYPE_SECOND());
+			//String issueDate2 = er.getSECOND_RELATED_PERSON_ID_ISSUED_DATE().equalsIgnoreCase("00000000") ? "": er.getSECOND_RELATED_PERSON_ID_ISSUED_DATE();
+			if(er.getSECOND_RELATED_PERSON_ID_ISSUED_DATE().length()==8)
+				issueDate2 = er.getSECOND_RELATED_PERSON_ID_ISSUED_DATE().equalsIgnoreCase("00000000") || er.getSECOND_RELATED_PERSON_ID_ISSUED_DATE() == null ? "": er.getSECOND_RELATED_PERSON_ID_ISSUED_DATE();
+			else
+				issueDate2="";	
+			logger.info("issueDate2 " + issueDate2);	
+			updateRelatedpersonFlag = jdbcTemplate.update(relatedPersonDetailSql, er.getCUSTOMER_NUMBER(), "",
+					relType2, er.getSECOND_RELATED_PERSON_CKYC_NUMBER(),getTitle(er.getSECOND_RELATED_PERSON_TITLE()), 
+					er.getSECOND_RELATED_PERSON_FIRST_NAME(),er.getSECOND_RELATED_PERSON_MIDDLE_NAME(),
+					checkLastName(er.getSECOND_RELATED_PERSON_LAST_NAME()),idProofType2, er.getSECOND_RELATED_PERSON_ID_NUMBER(),
+					er.getSECOND_RELATED_PERSON_OTHERS(),expDate2,er.getSECOND_RELATED_PERSON_ID_ISSUED_BY(),
+					er.getSECOND_RELATED_PERSON_ID_ISSUED_AT(),issueDate2,"2");
+
+		}
+		logger.info("updateRelatedpersonFlag " + updateRelatedpersonFlag);
+		if (er.getTHIRD_RELATED_PERSON_FIRST_NAME() != null && !er.getTHIRD_RELATED_PERSON_FIRST_NAME().equalsIgnoreCase("")) 
+		{
+			String idProofType3 = er.getTHIRD_RELATED_PERSON_PROOF_OF_ID() != null ? er.getTHIRD_RELATED_PERSON_PROOF_OF_ID() : "" ;
+			String expDate3 = "";
+			if(idProofType3.equalsIgnoreCase("A")){
+				expDate3 = er.getTHIRD_RELATED_PERSON_PASSPORT_EXPIRY_DATE();
+			}else if(idProofType3.equalsIgnoreCase("D")){
+				expDate3 = er.getTHIRD_RELATED_PERSON_DRIVING_LICENSE_EXPIRY_DATE();
+			}else if(idProofType3.equalsIgnoreCase("S")){
+				idProofType3 = "S"+er.getTHIRD_RELATED_PERSON_SIMPLIFIED();
+			}else{
+				expDate3 = "";
+			}
+
+			String issueDate3 = "";
+			String relType3 = relatedPersonType(er.getRELATED_PERSON_TYPE_THIRD());
+			if(er.getTHIRD_RELATED_PERSON_ID_ISSUED_DATE().length()==8)
+				issueDate3 = er.getTHIRD_RELATED_PERSON_ID_ISSUED_DATE().equalsIgnoreCase("00000000") ? "": er.getTHIRD_RELATED_PERSON_ID_ISSUED_DATE();
+			else
+				issueDate3 = "";
+
+			logger.info("issue date3 " + issueDate3);
+			updateRelatedpersonFlag = jdbcTemplate.update(relatedPersonDetailSql, er.getCUSTOMER_NUMBER(), "",relType3, er.getTHIRD_RELATED_PERSON_CKYC_NUMBER(),getTitle(er.getTHIRD_RELATED_PERSON_TITLE()), er.getTHIRD_RELATED_PERSON_FIRST_NAME(),er.getTHIRD_RELATED_PERSON_MIDDLE_NAME(),
+					checkLastName(er.getTHIRD_RELATED_PERSON_LAST_NAME()),idProofType3, er.getSECOND_RELATED_PERSON_ID_NUMBER(), er.getTHIRD_RELATED_PERSON_OTHERS(),expDate3,er.getTHIRD_RELATED_PERSON_ID_ISSUED_BY(),er.getTHIRD_RELATED_PERSON_ID_ISSUED_AT(),issueDate3,"3");	
+		}
+		logger.info("updateRelatedpersonFlag " +updateRelatedpersonFlag);
+		if(updateRelatedpersonFlag > 0){
+			int deleteFlag = deletefromTable("kyc_related_archive",er.getCUSTOMER_NUMBER());
+			if(deleteFlag >= 0 ){
+				insertToTable("kyc_related_person","kyc_related_archive",er.getCUSTOMER_NUMBER());
+			}
+			logger.info("delete Flag");
+		}
+	}
+
+
+	private void backupRelatedPersonDetail(String cifNo){
+
+		String backupRelatedPersonDetailQuery = "insert into kyc_related_history(CIF_NUMBER_FK, IS_DELETED, PERSON_TYPE, PERSON_KYC_NO, PREFIX, FIRSTNAME, MIDNAME, LASTNAME, IDENTIFICATION_TYPE, IDENTITY_NUMBER, OTHER_PROOF_NAME, EXPIRY_DATE, ISSUED_BY, ISSUED_AT, ISSUED_DATE, REL_SEQ_NO, H_MODIFIED_DATE, H_MODIFIED_BY) " +
+				"select CIF_NUMBER_FK, IS_DELETED, PERSON_TYPE, PERSON_KYC_NO, PREFIX, FIRSTNAME, MIDNAME, LASTNAME, IDENTIFICATION_TYPE, IDENTITY_NUMBER, OTHER_PROOF_NAME, EXPIRY_DATE, ISSUED_BY, ISSUED_AT, ISSUED_DATE, REL_SEQ_NO,systimestamp,? from kyc_related_person cd where cd.CIF_NUMBER_FK=?";
+		jdbcTemplate.update(backupRelatedPersonDetailQuery, modifiedBy, cifNo);
+	}
+
+
+	private void removeRelatedPersonDataFromTable(String cifNumber){
+		String removeCustomerRelatedPersonQuery = "delete from kyc_related_person where CIF_NUMBER_FK=?";
+		try{
+
+			jdbcTemplate.update(removeCustomerRelatedPersonQuery, cifNumber);
+		}catch (Exception e){
+			logger.info("No record found "+ e.getMessage());
+		}
+	}
+
+
+	private String relatedPersonType(String relTypeCode){
+		String relatedPersonType="";
+		if(relTypeCode.equalsIgnoreCase("1")){
+			relatedPersonType="GM";
+		}else if(relTypeCode.equalsIgnoreCase("2")){
+			relatedPersonType="AS";
+		}else if(relTypeCode.equalsIgnoreCase("3")){
+			relatedPersonType="AR";
+		}else{
+			relatedPersonType="N";
+		}
+		return relatedPersonType;
+	}
+
+	private void setCustomerIdentityDetail(CKYC_PERSONAL_DETAILS er, CKYC_PERSONAL_DETAILS personalDetail,
+			String dummyCif, String imgtype, String channel_id) {
+
+		/*
+		 * if(cifExistidentity(er.getCIFNumber())){
+		 * backupCustomerIdentityhistory(er.getCIFNumber()); }
+		 */
+		logger.info("setCustomerIdentityDetail  start");
+		logger.info("dummyCif "+ dummyCif);
+		if(!dummyCif.equalsIgnoreCase("")){
+			backupIdentityDetail(dummyCif);  // take backup of current db data
+			String removeCustomerIdentityDetailQuery = "delete from kyc_identification_details where CIF_NUMBER_FK=?";
+			jdbcTemplate.update(removeCustomerIdentityDetailQuery, dummyCif);
+			logger.info("setCustomerIdentityDetail  S1");
+		}
+
+		String checkCifExist = "select count(*) from kyc_identification_details where CIF_NUMBER_FK=:cifNo";
+		logger.info("checkCifExist "+ checkCifExist);
+		MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+		mpMapSqlParameterSource.addValue("cifNo", personalDetail.getCUSTOMER_NUMBER());
+		int cifCount = namedParameterJdbcTemplate.queryForObject(checkCifExist, mpMapSqlParameterSource, Integer.class);
+		String idProofType = er.getPROOF_OF_ID() != null ? er.getPROOF_OF_ID() : "";
+		String expDate = "";
+		if(er.getEKYC_FLAG().equalsIgnoreCase("Y")) {
+			idProofType="H";
+		}
+		if(idProofType.equalsIgnoreCase("A")){
+			expDate = er.getPASSPORT_EXPIRY_DATE();
+		}else if(idProofType.equalsIgnoreCase("D")){
+			expDate = er.getDRIVING_LICENSE_EXPIRY_DATE();
+		}else if(idProofType.equalsIgnoreCase("S")){
+			idProofType = "S"+er.getSIMPLIFIED();
+		}else{
+			// do nothing
+		}
+
+		//Start of CR 26050104
+		if(expDate==null||expDate.trim().isEmpty()||expDate.contains("00000000")||expDate.contains("00-00-0000")) {
+			expDate=null;
+		}
+		//End of CR 26050104
+
+
+		String custIdentityDetailQuery ="";
+
+		if (channel_id.equalsIgnoreCase("NONSCRUTINY")) {
+			int updateFlag = 0;
+			logger.info("cifCount " + cifCount);
+			if (imgtype.equalsIgnoreCase("04"))
+				idProofType = "E";
+			else if (imgtype.equalsIgnoreCase("36")) {
+				idProofType = "H";
+			}
+			logger.info(" NONSCRUTINY imgtype>>>>>>>>"+imgtype);
+			logger.info(" NONSCRUTINY idProofType>>>>>>>>"+idProofType);
+
+			//	int updateFlag = 0;
+			logger.info("cifCount " + cifCount);
+			if(cifCount > 0){
+				if(backupIdentityDetail(er.getCUSTOMER_NUMBER())){// take backup of current db data
+					custIdentityDetailQuery = "update kyc_identification_details set IDENTIFICATION_TYPE=?, IDENTITY_NUMBER=?, OTHER_PROOF_NAME=?, EXPIRY_DATE=to_date(?,'dd-mm-yyyy'),IDENTIFICATION_TYPE_2=?,IDENTITY_NUMBER_2=?,"
+							+ " ISSUED_BY=?, ISSUED_AT=?, ISSUED_DATE=?, IDENTITY_STATUS=?, CBS_ID_TYPE=? where CIF_NUMBER_FK=?";
+					updateFlag = jdbcTemplate.update(custIdentityDetailQuery, idProofType, er.getID_NMUBER(),
+							er.getOTHERS(), expDate, er.getID2_TYPE(), er.getID2_NUMBER(), "", "", "", "",
+							er.getCBS_ID_TYPE(), er.getCUSTOMER_NUMBER());
+				}
+			} else {
+				custIdentityDetailQuery = "insert into kyc_identification_details(CIF_NUMBER_FK, IDENTIFICATION_TYPE, IDENTITY_NUMBER, OTHER_PROOF_NAME, EXPIRY_DATE,IDENTIFICATION_TYPE_2,IDENTITY_NUMBER_2, ISSUED_BY, ISSUED_AT, ISSUED_DATE, IDENTITY_STATUS,CBS_ID_TYPE) "
+						+ " values(?,?,?,?,to_date(?,'dd-mm-yyyy'),?,?,?,?,to_date(?,'dd-mm-yyyy'),?,?)";
+				updateFlag = jdbcTemplate.update(custIdentityDetailQuery, er.getCUSTOMER_NUMBER(), idProofType,
+						er.getID_NMUBER(), er.getOTHERS(), expDate, er.getID2_TYPE(), er.getID2_NUMBER(), "", "", "",
+						"", er.getCBS_ID_TYPE());
+			}
+			logger.info("custIdentityDetailQuery " + custIdentityDetailQuery);
+			logger.info("Update Flag" + updateFlag);
+			if(updateFlag > 0){
+				int deleteFlag = deletefromTable("kyc_identification_archive",er.getCUSTOMER_NUMBER());
+				if(deleteFlag >= 0 ){
+					insertToTable("kyc_identification_details","kyc_identification_archive",er.getCUSTOMER_NUMBER());
+				}
+				logger.info("deleteFlag " + deleteFlag);
+
+			}
+		}	 else {
+			int updateFlag = 0;
+			logger.info("cifCount " + cifCount);
+
+			if(cifCount > 0){
+				if(backupIdentityDetail(er.getCUSTOMER_NUMBER())){// take backup of current db data
+					custIdentityDetailQuery = "update kyc_identification_details set IDENTIFICATION_TYPE=?, IDENTITY_NUMBER=?, OTHER_PROOF_NAME=?, EXPIRY_DATE=to_date(?,'dd-mm-yyyy'),IDENTIFICATION_TYPE_2=?,IDENTITY_NUMBER_2=?,"
+							+ " ISSUED_BY=?, ISSUED_AT=?, ISSUED_DATE=?, IDENTITY_STATUS=?, CBS_ID_TYPE=? where CIF_NUMBER_FK=?";
+					updateFlag = jdbcTemplate.update(custIdentityDetailQuery, idProofType,er.getID_NMUBER(), er.getOTHERS(), expDate,er.getID2_TYPE(),er.getID2_NUMBER(), "", "", "","",er.getCBS_ID_TYPE(), er.getCUSTOMER_NUMBER());
+				}
+			}else{
+				custIdentityDetailQuery = "insert into kyc_identification_details(CIF_NUMBER_FK, IDENTIFICATION_TYPE, IDENTITY_NUMBER, OTHER_PROOF_NAME, EXPIRY_DATE,IDENTIFICATION_TYPE_2,IDENTITY_NUMBER_2, ISSUED_BY, ISSUED_AT, ISSUED_DATE, IDENTITY_STATUS,CBS_ID_TYPE) "
+						+ " values(?,?,?,?,to_date(?,'dd-mm-yyyy'),?,?,?,?,to_date(?,'dd-mm-yyyy'),?,?)";
+				updateFlag = jdbcTemplate.update(custIdentityDetailQuery, er.getCUSTOMER_NUMBER(),idProofType, er.getID_NMUBER(), er.getOTHERS(), expDate,er.getID2_TYPE(),er.getID2_NUMBER(), "","", "", "",er.getCBS_ID_TYPE());
+			}
+			logger.info("custIdentityDetailQuery " + custIdentityDetailQuery);
+			logger.info("Update Flag" + updateFlag);
+			if(updateFlag > 0){
+				int deleteFlag = deletefromTable("kyc_identification_archive",er.getCUSTOMER_NUMBER());
+				if(deleteFlag >= 0 ){
+					insertToTable("kyc_identification_details","kyc_identification_archive",er.getCUSTOMER_NUMBER());
+				}
+				logger.info("deleteFlag " + deleteFlag);
+
+			}
+		}
+	}
+
+	private boolean backupIdentityDetail(String cifNo){
+		try{
+
+			String backupIdentityDetailQuery = "insert into kyc_identification_history(CIF_NUMBER_FK, IDENTIFICATION_TYPE, IDENTITY_NUMBER, OTHER_PROOF_NAME, EXPIRY_DATE, ISSUED_BY, ISSUED_AT, ISSUED_DATE, IDENTITY_STATUS, H_MODIFIED_DATE, H_MODIFIED_BY) " +
+					" select CIF_NUMBER_FK, IDENTIFICATION_TYPE, IDENTITY_NUMBER, OTHER_PROOF_NAME, EXPIRY_DATE, ISSUED_BY, ISSUED_AT, ISSUED_DATE, IDENTITY_STATUS, systimestamp,? from kyc_identification_details cd where cd.CIF_NUMBER_FK=?";
+			jdbcTemplate.update(backupIdentityDetailQuery, modifiedBy, cifNo);
+			return true;
+		}catch(Exception e){
+			logger.info("backupIdentityDetail >>> "+e.getMessage());
+			return false;
+		}
+
+	}
+
+}
