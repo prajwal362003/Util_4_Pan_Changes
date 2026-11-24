@@ -1,0 +1,472 @@
+package com.sbi.encryption;
+import java.io.File;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
+import java.nio.ByteBuffer;
+import java.security.GeneralSecurityException;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.InvalidKeyException;
+import java.security.KeyStore;
+import java.security.KeyStore.PrivateKeyEntry;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.PrivateKey;
+import java.security.Provider;
+import java.security.PublicKey;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.security.spec.MGF1ParameterSpec;
+import java.util.Enumeration;
+
+import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.KeyGenerator;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.OAEPParameterSpec;
+import javax.crypto.spec.PSource;
+import javax.crypto.spec.SecretKeySpec;
+
+import org.apache.commons.codec.binary.Base64;
+import org.apache.logging.log4j.LogManager; 
+import org.apache.logging.log4j.Logger;
+import org.bouncycastle.crypto.engines.AESEngine;
+import org.bouncycastle.crypto.modes.CBCBlockCipher;
+import org.bouncycastle.crypto.paddings.PKCS7Padding;
+import org.bouncycastle.crypto.paddings.PaddedBufferedBlockCipher;
+import org.bouncycastle.crypto.params.KeyParameter;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+
+import com.sbi.configuration.ExtractProperties;
+
+
+
+
+/*import org.springframework.util.Base64Utils;*/
+
+public class CkycEncrytpionAPIUtil {
+
+	private static final Logger logger = LogManager.getLogger(CkycEncrytpionAPIUtil.class);
+
+	private String EnqPublicKeyFileName = ExtractProperties.getInstance().getProperty("CKYC_PUBLIC_KEY");
+	private PublicKey publicKey;
+	private PrivateKeyEntry privateKey;
+	
+	private String EnqCKYCKeyStorePath = ExtractProperties.getInstance().getProperty("EnqCKYCKeyStorePath");
+	String EnqCKYCKeyStorePathPassWord = ExtractProperties.getInstance().getProperty("EnqCKYCKeyStorePathPassWord");
+	
+	public CkycEncrytpionAPIUtil() {
+		
+		String EnqPublicKeyFileName = ExtractProperties.getInstance().getProperty("CKYC_PUBLIC_KEY");
+		logger.info("EnqPublicKeyFileName : "+EnqPublicKeyFileName);
+		logger.info("EnqCKYCKeyStorePath : "+EnqCKYCKeyStorePath);
+
+		InputStream is=  null;
+		try {
+			CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
+			//			is = getClass().getClassLoader().getResourceAsStream(EnqPublicKeyFileName);
+
+			is=new FileInputStream(new File(EnqPublicKeyFileName));
+			logger.info("EnqPublicKeyFileName : "+EnqPublicKeyFileName);
+			X509Certificate cert = (X509Certificate) certFactory.generateCertificate(is);
+			this.publicKey = cert.getPublicKey();
+		} catch (Exception e) {
+			e.printStackTrace();
+			throw new RuntimeException("Could not intialize encryption module",e);
+		} finally {
+			if(is != null){
+				try {
+					is.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}	
+			}
+		}
+	}
+
+	//generate 256 bit session key
+	public byte[] generateSessionKey(int keySize) throws NoSuchAlgorithmException, NoSuchProviderException, UnsupportedEncodingException {
+		/*String key = UUID.randomUUID().toString().toUpperCase().replace("-", "").substring(0,16);
+		byte[] symmKey = key.getBytes("UTF-8");
+		return symmKey;*/
+		KeyGenerator kgen = KeyGenerator.getInstance("AES");
+		kgen.init(keySize);
+		SecretKey key = kgen.generateKey();
+		byte[] symmKey = key.getEncoded();
+		return symmKey;
+	}
+
+	//encrypt data using session key and then encode it in base64
+	public String encryptUsingAESToBase64(byte[] strToEncrypt, byte[] sessionKey){
+		try {
+			SecretKeySpec secKey = new SecretKeySpec(sessionKey,"AES");
+			Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+			cipher.init(Cipher.ENCRYPT_MODE, secKey);
+			byte[] encrypted = cipher.doFinal(strToEncrypt);
+			return new String(Base64.encodeBase64(encrypted));
+
+		} catch (Exception e) {
+			e.printStackTrace();
+		} 
+		return null;
+	}
+
+	//encrypt the session key with of CERSEI's public key and convert it into base64
+	public String encryptUsingPublicKeyToBase64(byte[] data) throws IOException, GeneralSecurityException {
+		Cipher pkCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+		pkCipher.init(Cipher.ENCRYPT_MODE, this.publicKey);
+		byte[] encSessionKey = pkCipher.doFinal(data);
+		return new String(Base64.encodeBase64(encSessionKey));
+	}
+
+	//decode the session key from base64 and then decrypt it with IF's private key
+	/*public byte[] decryptUsingPrivateKeyToBase64(byte[] data) throws IOException, GeneralSecurityException {
+		Cipher pkCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+		this.privateKey = getKeyFromKeyStore("123456".toCharArray(),null);
+		PrivateKey key = this.privateKey.getPrivateKey();
+		pkCipher.init(Cipher.DECRYPT_MODE, key);
+		byte[] sessionKey = pkCipher.doFinal(Base64.decodeBase64(data));
+		return sessionKey;
+	}*/
+
+	//decode PID from base64 then decrypt data using session key
+	public byte[] decrypt(byte[] strToDecode, byte[] sessionKey){
+		try {
+			SecretKeySpec secKey = new SecretKeySpec(sessionKey,"AES");
+			Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+			cipher.init(Cipher.DECRYPT_MODE, secKey);
+			byte[] original = cipher.doFinal(Base64.decodeBase64(strToDecode));
+			return original;
+		} catch (Exception e) {
+			e.printStackTrace();
+		} 
+		return strToDecode;
+	}
+
+	//encrypt data using session key and then encode it in base64
+	public byte[] encryptUsingSessionKey(byte[] strToEncrypt, byte[] sessionKey, boolean otherChannelFlag){
+		try {
+			PaddedBufferedBlockCipher cipher;
+			if(otherChannelFlag){
+				cipher = new PaddedBufferedBlockCipher(
+						new CBCBlockCipher(new  AESEngine()), new PKCS7Padding());
+			}else{
+				cipher = new PaddedBufferedBlockCipher(new AESEngine(), new PKCS7Padding());
+			}
+			cipher.init(true, new KeyParameter(sessionKey));
+			int outputSize = cipher.getOutputSize(strToEncrypt.length);
+
+			byte[] tempOP = new byte[outputSize];
+			int processLen = cipher.processBytes(strToEncrypt, 0, strToEncrypt.length, tempOP, 0);
+			int outputLen = cipher.doFinal(tempOP, processLen);
+
+			byte[] result = new byte[processLen + outputLen];
+			System.arraycopy(tempOP, 0, result, 0, result.length);
+			if(otherChannelFlag){
+				return Base64.encodeBase64(result);
+			}else{
+				return result;
+			}
+		} catch (Exception e) {
+			//					logger.info("Exception occurred ::::: " +e.getMessage());
+			e.getMessage();
+		} 
+		return null;
+	}
+
+	//decode PID from base64 then decrypt data using session key
+	public byte[] decryptUsingSessionKey(byte[] strToDecode, byte[] sessionKey, boolean decodeFlag){
+		try {
+			PaddedBufferedBlockCipher cipher;
+			byte[] result; 
+			if(decodeFlag){
+				cipher = new PaddedBufferedBlockCipher(
+						new CBCBlockCipher(new  AESEngine()), new PKCS7Padding());
+				strToDecode = Base64.decodeBase64(strToDecode);
+			}else{
+				cipher = new PaddedBufferedBlockCipher(new AESEngine(), new PKCS7Padding());
+			}
+			cipher.init(false, new KeyParameter(sessionKey));
+			int outputSize = cipher.getOutputSize(strToDecode.length);
+			byte[] tempOP = new byte[outputSize];
+			int processLen = cipher.processBytes(strToDecode, 0, strToDecode.length, tempOP, 0);
+			int outputLen = cipher.doFinal(tempOP, processLen);
+			result = new byte[processLen + outputLen];
+			System.arraycopy(tempOP, 0, result, 0, result.length);
+			return result;
+		} catch (Exception e) {
+			logger.info("Exception occurred ::::: " +e.getMessage());
+		} 
+		return strToDecode;
+	}
+
+	/*public KeyStore.PrivateKeyEntry getKeyFromKeyStore(char[] keyStorePassword, String alias)
+	  {
+	    FileInputStream keyFileStream = null;
+	    try {
+	      KeyStore ks = KeyStore.getInstance("PKCS12");
+	      keyFileStream = new FileInputStream(EnqCKYCKeyStorePath);
+	      ks.load(keyFileStream, keyStorePassword);
+	      if (alias == null)
+	      {
+	        Enumeration alias1 = ks.aliases();
+	        if (ks.size() > 1)
+	        {
+	          throw new Exception("More that 1 Keys found in the key store. Please specify Key Alias property!");
+	        }
+
+	        alias1.hasMoreElements();
+	        alias = (String)alias1.nextElement();
+	      }
+	      KeyStore.PrivateKeyEntry entry = (KeyStore.PrivateKeyEntry)ks.getEntry(alias, 
+	        new KeyStore.PasswordProtection(keyStorePassword));
+	      KeyStore.PrivateKeyEntry localPrivateKeyEntry1 = entry;
+	      return localPrivateKeyEntry1;
+	    }
+	    catch (Exception e) {
+	      e.printStackTrace();
+	      return null;
+	    } finally {
+	      if (keyFileStream != null)
+	        try {
+	          keyFileStream.close();
+	        } catch (IOException e) {
+	          e.printStackTrace();
+	        }
+	    }
+
+	  }*/
+
+
+	//Source authentication code
+
+	//generate 256 bit unencoded session key
+	public SecretKey generateUnencodedSessionKey(int keySize) throws NoSuchAlgorithmException, NoSuchProviderException, UnsupportedEncodingException {
+		KeyGenerator kgen = KeyGenerator.getInstance("AES");
+		kgen.init(keySize);
+		SecretKey key = kgen.generateKey();
+		return key;
+	}
+
+	//AES Encrypt data in GCM Mode with NoPadding
+	public  byte[] encryptgcm(byte[] data, SecretKey sk, byte[] IV){
+		// Get Cipher Instance
+		Cipher cipher = null;
+		try {
+			cipher = Cipher.getInstance("AES/GCM/NoPadding");
+		} catch (NoSuchAlgorithmException | NoSuchPaddingException e) {
+
+			e.printStackTrace();
+		}
+
+		// Create SecretKeySpec
+		SecretKeySpec keySpec = new SecretKeySpec(sk.getEncoded(), "AES");
+
+		// Create GCMParameterSpec
+		GCMParameterSpec gcmParameterSpec = new GCMParameterSpec(16 * 8, IV);
+
+		System.out.println("Length gcm Parameter spec>> "+gcmParameterSpec.getTLen());
+		// Initialize Cipher for ENCRYPT_MODE
+		try {
+			cipher.init(Cipher.ENCRYPT_MODE, keySpec, gcmParameterSpec);
+		} catch (InvalidKeyException | InvalidAlgorithmParameterException e) {
+
+			e.printStackTrace();
+		}
+
+		// Perform Encryption
+		byte[] cipherText = null;
+		try {
+			//				cipherText = cipher.doFinal("Thsi is message".getBytes());
+			cipherText = cipher.doFinal(data);
+		} catch (IllegalBlockSizeException | BadPaddingException e) {
+
+			e.printStackTrace();
+		}
+
+		byte[] cipherTextWithIv = ByteBuffer.allocate(IV.length + cipherText.length)
+				.put(IV)
+				.put(cipherText)
+				.array();
+		return cipherTextWithIv;
+
+	}
+
+	/*	public byte[] encryptUsingCKYCPublicKey(byte[] data, String version) throws IOException, GeneralSecurityException {
+			logger.info("INSID encryptUsingCKYCPublicKey ");
+			Cipher pkCipher = null;
+			Provider bcProvider = new BouncyCastleProvider();
+			logger.info("INSID encryptUsingCKYCPublicKey ");
+			pkCipher = Cipher.getInstance("RSA/NONE/OAEPWithSHA256AndMGF1Padding", bcProvider);
+			logger.info("INSID encryptUsingCKYCPublicKey ");
+			logger.info("pkCipher :: "+pkCipher);
+			pkCipher.init(Cipher.ENCRYPT_MODE, this.publicKey);
+			logger.info("data size :" + data.length);
+			byte[] encSessionKey = pkCipher.doFinal(data);
+			logger.info("INSIDE encryptUsingCKYCPublicKey encSessionKey "+ encSessionKey);
+			return encSessionKey;
+		}*/
+
+	public byte[] encryptUsingCKYCPublicKey(byte[] data, String version) throws IOException, GeneralSecurityException {
+		Cipher pkCipher = Cipher.getInstance("RSA/ECB/OAEPPadding"); 
+		OAEPParameterSpec oaepParams = new OAEPParameterSpec(
+				"SHA-256", 
+				"MGF1", 
+				new MGF1ParameterSpec("SHA-256"), 
+				PSource.PSpecified.DEFAULT
+				);
+		pkCipher.init(Cipher.ENCRYPT_MODE, this.publicKey, oaepParams);
+		return pkCipher.doFinal(data);
+	}
+
+
+	public byte[] decryptUsingPrivateKeyTest(byte[] encryptedData, String version) throws IOException, GeneralSecurityException {
+		Cipher pkCipher = Cipher.getInstance("RSA/ECB/OAEPPadding"); 
+
+		KeyStore.PrivateKeyEntry keyEntry = getKeyFromKeyStoreTest(this.EnqCKYCKeyStorePathPassWord.toCharArray(), null);
+		PrivateKey key = keyEntry.getPrivateKey();
+
+		OAEPParameterSpec oaepParams = new OAEPParameterSpec(
+				"SHA-256", 
+				"MGF1", 
+				new MGF1ParameterSpec("SHA-256"), 
+				PSource.PSpecified.DEFAULT
+				);
+		pkCipher.init(Cipher.DECRYPT_MODE, key, oaepParams);
+		return pkCipher.doFinal(encryptedData);
+	}
+
+
+	/*	 public byte[] decryptUsingPrivateKeyTest(byte[] data, String version) throws IOException, GeneralSecurityException {
+				Cipher pkCipher = null;
+				logger.info("decryptUsingPrivateKeyTest :: ");
+				Provider bcProvider = new BouncyCastleProvider();
+				pkCipher = Cipher.getInstance("RSA/NONE/OAEPWithSHA256AndMGF1Padding", bcProvider);
+				logger.info("pkCipher :: "+pkCipher);
+				String pwd2 = EnqCKYCKeyStorePathPassWord;
+				KeyStore.PrivateKeyEntry keyEntry = getKeyFromKeyStoreTest(pwd2.toCharArray(), null);
+				PrivateKey key = keyEntry.getPrivateKey();
+				pkCipher.init(Cipher.DECRYPT_MODE, key);
+				System.out.println("Data Size >> "+data.length);
+				byte[] sessionKey = pkCipher.doFinal(data);
+				return sessionKey;
+			}
+	 */
+
+
+
+	public KeyStore.PrivateKeyEntry getKeyFromKeyStoreTest(char[] keyStorePassword, String alias)
+	{
+		FileInputStream keyFileStream = null;
+		try {
+			KeyStore ks = KeyStore.getInstance("PKCS12");
+			//		      keyFileStream = new FileInputStream("D:\\Rajeshwari\\CKYCAPI_SA\\API_CLIENT\\cersai-download-ws-c-sav1\\src\\resources\\CKYC_UAT_Signed.pfx");
+			// keyFileStream = new FileInputStream("D:\\\\\\\\BHAKTI\\\\\\\\CERTIFICATE\\\\\\\\CKYC_UAT_Signed.pfx");
+			keyFileStream = new FileInputStream( EnqCKYCKeyStorePath);
+
+			ks.load(keyFileStream, keyStorePassword);
+			if (alias == null)
+			{
+				Enumeration alias1 = ks.aliases();
+				if (ks.size() > 1)
+				{
+					throw new Exception("More that 1 Keys found in the key store. Please specify Key Alias property!");
+				}
+
+				alias1.hasMoreElements();
+				alias = (String)alias1.nextElement();
+			}
+			KeyStore.PrivateKeyEntry entry = (KeyStore.PrivateKeyEntry)ks.getEntry(alias, 
+					new KeyStore.PasswordProtection(keyStorePassword));
+			KeyStore.PrivateKeyEntry localPrivateKeyEntry1 = entry;
+			return localPrivateKeyEntry1;
+		}
+		catch (Exception e) {
+			logger.info("Exception occurred ::::: " +e.getMessage());
+			return null;
+		} finally {
+			if (keyFileStream != null)
+				try {
+					keyFileStream.close();
+				} catch (IOException e) {
+					logger.info("Exception occurred ::::: " +e.getMessage());
+				}
+		}
+
+	}
+
+	//AES Decrypt data in GCM Mode with NoPadding
+	public static String decryptgcm(byte[] cipherText, SecretKey key) throws Exception
+	{
+		// Get Cipher Instance
+		Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+
+		// Create SecretKeySpec
+		SecretKeySpec keySpec = new SecretKeySpec(key.getEncoded(), "AES");
+
+		ByteBuffer bb = ByteBuffer.wrap(cipherText);
+
+		byte[] iv = new byte[12];
+		bb.get(iv);
+		//bb.get(iv, 0, iv.length);
+
+		cipherText = new byte[bb.remaining()];
+		bb.get(cipherText);
+		// Create GCMParameterSpec
+		GCMParameterSpec gcmParameterSpec = new GCMParameterSpec(16 * 8, iv);
+
+		// Initialize Cipher for DECRYPT_MODE
+		cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmParameterSpec);
+
+		// Perform Decryption
+		byte[] decryptedText = cipher.doFinal(cipherText);
+
+		return new String(decryptedText);
+	}
+
+	//encrypt the session key with of CERSEI's public key and convert it into base64
+	public byte[] encryptClientSessionKey(byte[] data, String version, String channelId,String channelPublicKeyPath) throws IOException, GeneralSecurityException {
+		Cipher pkCipher = null;
+		Provider bcProvider = new BouncyCastleProvider();
+		//pkCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA256AndMGF1Padding");
+		//pkCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA256AndMGF1Padding");
+		pkCipher = Cipher.getInstance("RSA/NONE/OAEPWithSHA256AndMGF1Padding", bcProvider);
+		logger.info("pkCipher :: "+pkCipher);
+
+		PublicKey publicKeyClient; 
+		InputStream isClient=  null;
+		try {
+			CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
+			/*For Local*/
+			isClient=new FileInputStream(new File(channelPublicKeyPath+channelId+"_publicKey.cer"));
+			/*For WAS*/
+			//					isClient=new FileInputStream(new File(channelPublicKeyPath+channelId+"/"+channelId+"_publicKey.cer"));
+			X509Certificate cert = (X509Certificate) certFactory.generateCertificate(isClient);
+			publicKeyClient = cert.getPublicKey();
+
+		} catch (Exception e) {
+			logger.info("Exception occurred ::::: " +e.getMessage());
+			throw new RuntimeException("Could not intialize encryption module", e);
+		} finally {
+			if(isClient != null){
+				try {
+					isClient.close();
+				} catch (IOException e) {
+					logger.info("Exception occurred ::::: " +e.getMessage());
+				}	
+			}
+		}
+		pkCipher.init(Cipher.ENCRYPT_MODE, publicKeyClient);
+		byte[] encSessionKey = pkCipher.doFinal(data);
+		return encSessionKey;
+	}
+
+
+
+
+}
