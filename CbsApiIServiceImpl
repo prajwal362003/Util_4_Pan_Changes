@@ -1,0 +1,183 @@
+package com.sbi.serviceImpl;
+
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Calendar;
+import java.util.concurrent.ThreadLocalRandom;
+
+import org.apache.commons.lang3.RandomStringUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.stereotype.Service;
+
+import com.google.gson.Gson;
+import com.sbi.configuration.ExtractProperties;
+import com.sbi.dao.CbsApiDao;
+import com.sbi.dao.CustomerNormalDetailsDao;
+import com.sbi.dto.CkycEnqRequestBean;
+import com.sbi.dto.CkycEnqResponseBean;
+import com.sbi.dto.Customer;
+import com.sbi.dto.CustomerNormalDetailsEnquiryResponse;
+import com.sbi.service.CbsApiIService;
+
+@Service
+public class CbsApiIServiceImpl implements CbsApiIService {
+
+	final static Logger logger = LogManager.getLogger(CbsApiIServiceImpl.class);
+
+	private static final String CustomerEnquiryURL = ExtractProperties.getInstance().getProperty("CustomerNormalDetail.url");
+	private static final String ckycurl = ExtractProperties.getInstance().getProperty("Ckycurl.url");
+
+	@Autowired
+	CbsApiDao cbsApiDao;
+
+	@Autowired
+	CustomerNormalDetailsDao customerNormalDetailsDao;
+	
+	private final EisServiceImpl eisService;
+	
+	public CbsApiIServiceImpl(EisServiceImpl eisService) {
+		this.eisService=eisService;
+	}
+
+	@Override
+	public CustomerNormalDetailsEnquiryResponse fetch67000data(Customer customer) {
+
+		logger.info("**************in NORMAL_DETAILS Controller for cif ************************" + customer.cifNumber());
+		CkycEnqRequestBean ckycReq = new CkycEnqRequestBean();
+		String requestRefNo = generateReqRefNo1();
+		ckycReq.setSOURCE_ID("CK");
+
+		ckycReq.setBRANCH_CODE(customer.branchCode());
+		ckycReq.setCUSTOMER_NUMBER(customer.cifNumber());
+		//  CIFEnqDaoimpl enqServ = new CIFEnqDaoimpl();
+
+		Gson gs = new Gson();
+		String requestString = "";
+		requestString = gs.toJson(ckycReq);
+		logger.info("CKYC REQUEST >>>>" + requestString);
+		String decryptedResponse="";
+
+		try{
+			//decryptedResponse = callAPICKYC(requestString, CustomerEnquiryURL, requestRefNo);
+			decryptedResponse =  eisService.callAPIGen6(requestString, CustomerEnquiryURL, requestRefNo);
+		}catch (Exception e){
+			e.printStackTrace();
+		}
+		logger.info(":::::::decryptedResponse for NORMAL_DETAILS Api :::::::");
+
+		CustomerNormalDetailsEnquiryResponse enqRes1 = (CustomerNormalDetailsEnquiryResponse)gs.fromJson(decryptedResponse, CustomerNormalDetailsEnquiryResponse.class);
+		return enqRes1;
+	}
+
+	@Override
+	public CkycEnqResponseBean fetch60429(Customer customer) {
+
+		logger.info("**************fetch60429 ************************" + customer.cifNumber());
+		CkycEnqRequestBean ckycReq = new CkycEnqRequestBean();
+		String requestRefNo = generateReqRefNo1();
+		ckycReq.setSOURCE_ID("CK");
+
+		ckycReq.setBRANCH_CODE(customer.branchCode());
+		ckycReq.setCUSTOMER_NUMBER(customer.cifNumber());
+		//  CIFEnqDaoimpl enqServ = new CIFEnqDaoimpl();
+
+		Gson gs = new Gson();
+		String requestString = "";
+		requestString = gs.toJson(ckycReq);
+		logger.info("Plain Request >>>>" + requestString);
+		String decryptedResponse="";
+		//EisServiceImpl eis=new EisServiceImpl();
+		try{
+			//decryptedResponse = callAPICKYC(requestString, ckycurl, requestRefNo);
+			decryptedResponse =  eisService.callAPIGen6(requestString, ckycurl, requestRefNo);
+		}catch (Exception e){
+			e.printStackTrace();
+		}
+		logger.info(":::::::decryptedResponse for CkycEnqResponseBean :::::::");
+		CkycEnqResponseBean enqRes1 = (CkycEnqResponseBean)gs.fromJson(decryptedResponse, CkycEnqResponseBean.class);
+		return enqRes1;
+	}
+
+	/*public String generateReqRefNo1_bkp() {
+		int julianday = Calendar.getInstance().get(Calendar.DAY_OF_YEAR);
+		String julian = "";
+		String tempJulian="";
+		if(julianday<100 && julianday>=10) {
+			tempJulian = Integer.toString(julianday);
+			julian = "0"+tempJulian;
+		}else if(julianday<10) {
+			tempJulian = Integer.toString(julianday);
+			julian = "00"+tempJulian;
+		}else {
+			julian = Integer.toString(julianday);
+		}
+		int yr = Calendar.getInstance().get(Calendar.YEAR);
+		String year = Integer.toString(yr);
+		String hhMMsss = Integer.toString(Calendar.getInstance().get(Calendar.HOUR_OF_DAY))+Integer.toString(Calendar.getInstance().get(Calendar.MINUTE))+Integer.toString(Calendar.getInstance().get(Calendar.SECOND))+Integer.toString(Calendar.getInstance().get(Calendar.MILLISECOND));
+		if(hhMMsss.length()<9){
+			System.out.println("length is less then 9   "+hhMMsss.length());
+			while(hhMMsss.length() != 9) {
+				hhMMsss = hhMMsss +"0";
+			}
+		}
+		System.out.println("Inside julian hhMMsssSSS:" + hhMMsss);
+		StringBuffer sb = new StringBuffer();
+		sb.append("SBICK");
+		sb.append(year.substring(2, 4));
+		sb.append(julian);
+		sb.append(hhMMsss);
+		String randomKey = RandomStringUtils.randomNumeric(6);
+		sb.append(randomKey);
+		String str = sb.toString();
+		System.out.println("RRN ::::"+str);
+		System.out.println("RRN size::::"+str.length());
+		return str;
+	}
+*/
+
+	// 'uu' = 2-digit year, 'DDD' = 3-digit day of year (001-366)
+	private static final DateTimeFormatter DATE_PART_FORMATTER = DateTimeFormatter.ofPattern("uuDDD");
+	// Formatter for time components: HH (00-23), mm (00-59), ss (00-59), SSS (000-999)
+	private static final DateTimeFormatter TIME_PART_FORMATTER = DateTimeFormatter.ofPattern("HHmmssSSS");
+	public String generateReqRefNo1() {
+		LocalDateTime now = LocalDateTime.now();
+		String datePart = now.format(DATE_PART_FORMATTER);//Generate Date Part: 2-digit Year + 3-digit Day of Year (e.g., "26195" for 2026, 195th day)
+		String timePart = now.format(TIME_PART_FORMATTER);//Generate Time Part: HHmmssSSS (Always 9 digits due to formatter)
+		String randomKey = generateSecureNumeric(6);//Generate 6-digit Random Numeric Key
+		StringBuilder sb = new StringBuilder(24); // allocate capacity: 5(SBICK) + 5(date) + 9(time) + 6(random)
+		sb.append("SBICK");
+		sb.append(datePart);
+		sb.append(timePart);
+		sb.append(randomKey);
+		String result = sb.toString();
+		logger.info("Generated RRN: " + result);
+		logger.info("RRN Size: " + result.length());
+		return result;
+	}
+
+	private String generateSecureNumeric(int length) {
+		StringBuilder randomSb = new StringBuilder(length);
+		ThreadLocalRandom random = ThreadLocalRandom.current();
+		for (int i = 0; i < length; i++) {
+			randomSb.append(random.nextInt(0, 10));
+		}
+		return randomSb.toString();
+	}
+
+
+	@Override
+	public void save60429IntoCkyc(CkycEnqResponseBean cbs60429Data,Customer customer) {
+		cbsApiDao.saveCbs60429IntoKycTables(cbs60429Data,customer);
+	}
+
+
+	@Override
+	public void save67000IntoCkyc(CustomerNormalDetailsEnquiryResponse cbs67000Data,CkycEnqResponseBean cbs60429Data, Customer customer) {
+		customerNormalDetailsDao.savecbs67000IntoTables(cbs67000Data,cbs60429Data,customer);
+
+	}
+
+}
