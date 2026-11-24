@@ -1,0 +1,302 @@
+package com.sbi.encryption;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.StringReader;
+import java.io.StringWriter;
+import java.security.KeyStore;
+import java.security.Provider;
+import java.security.PublicKey;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.List;
+
+import javax.xml.crypto.MarshalException;
+import javax.xml.crypto.XMLStructure;
+import javax.xml.crypto.dsig.CanonicalizationMethod;
+import javax.xml.crypto.dsig.DigestMethod;
+import javax.xml.crypto.dsig.Reference;
+import javax.xml.crypto.dsig.SignatureMethod;
+import javax.xml.crypto.dsig.SignedInfo;
+import javax.xml.crypto.dsig.Transform;
+import javax.xml.crypto.dsig.XMLSignature;
+import javax.xml.crypto.dsig.XMLSignatureException;
+import javax.xml.crypto.dsig.XMLSignatureFactory;
+import javax.xml.crypto.dsig.dom.DOMSignContext;
+import javax.xml.crypto.dsig.dom.DOMValidateContext;
+import javax.xml.crypto.dsig.keyinfo.KeyInfo;
+import javax.xml.crypto.dsig.keyinfo.KeyInfoFactory;
+import javax.xml.crypto.dsig.keyinfo.X509Data;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+
+import com.sbi.configuration.ExtractProperties;
+
+
+
+
+
+public class CkycAPISignUtil
+{
+	private static final String MEC_TYPE = "DOM";
+	private static final String WHOLE_DOC_URI = "";
+	private static final String KEY_STORE_TYPE = "PKCS12";
+	private KeyStore.PrivateKeyEntry keyEntry;
+	private Provider provider;
+	private static final String KEY_STORE_TYPE_DONGLE = "PKCS11";
+	private String keyStorePath="/resources/mykey";
+
+	String publicKeyFileName=ExtractProperties.getInstance().getProperty("CKYC_PUBLIC_KEY");
+
+	public CkycAPISignUtil(String keyStoreFile, char[] keyStorePassword, String alias)
+	{
+		this.keyEntry = getKeyFromKeyStore(keyStoreFile, keyStorePassword, 
+				alias);
+
+		if (this.keyEntry == null)
+			throw new RuntimeException(
+					"Key could not be read for digital signature. Please check value of signature alias and signature password, and restart the Auth Client");
+	}
+
+	public CkycAPISignUtil(String keyStoreFile, char[] keyStorePassword)
+	{
+		this.keyEntry = getKeyFromKeyStore(keyStoreFile, keyStorePassword, null);
+
+		if (this.keyEntry == null)
+			throw new RuntimeException(
+					"Key could not be read for digital signature. Please check value of signature alias and signature password, and restart the Auth Client");
+	}
+
+	public CkycAPISignUtil() {
+	}
+
+	public String signXML(String xmlDocument, boolean includeKeyInfo)
+	{
+
+		try
+		{
+			DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+			dbf.setNamespaceAware(true);
+			Document inputDocument = dbf.newDocumentBuilder().parse(
+					new InputSource(new StringReader(xmlDocument)));
+
+			Document signedDocument = sign(inputDocument, includeKeyInfo);
+
+			StringWriter stringWriter = new StringWriter();
+			TransformerFactory tf = TransformerFactory.newInstance();
+			Transformer trans = tf.newTransformer();
+			trans.transform(new DOMSource(signedDocument), 
+					new StreamResult(stringWriter));
+			return stringWriter.getBuffer().toString();
+		} catch (Exception e) {
+
+			throw new RuntimeException(
+					"Error while digitally signing the XML document", e);
+		}
+	}
+
+	private Document sign(Document xmlDoc, boolean includeKeyInfo)
+			throws Exception
+	{
+		if (System.getenv("SKIP_DIGITAL_SIGNATURE") != null) {
+			return xmlDoc;
+		}
+
+		XMLSignatureFactory fac = XMLSignatureFactory.getInstance("DOM");
+
+		Reference ref = fac.newReference("", fac.newDigestMethod(
+				DigestMethod.SHA1, null), Collections.singletonList(fac
+						.newTransform(Transform.ENVELOPED, 
+								(XMLStructure)null)), null, null);
+
+		SignedInfo sInfo = fac
+				.newSignedInfo(fac.newCanonicalizationMethod(
+						CanonicalizationMethod.INCLUSIVE, 
+						(XMLStructure)null), fac
+						.newSignatureMethod(SignatureMethod.RSA_SHA1, null), 
+						Collections.singletonList(ref));
+
+		if (this.keyEntry == null) {
+			throw new RuntimeException(
+					"Key could not be read for digital signature. Please check value of signature alias and signature password, and restart the Auth Client");
+		}
+
+		X509Certificate x509Cert = (X509Certificate)this.keyEntry.getCertificate();
+
+		KeyInfo kInfo = getKeyInfo(x509Cert, fac);
+		DOMSignContext dsc = new DOMSignContext(this.keyEntry.getPrivateKey(), 
+				xmlDoc.getDocumentElement());
+		XMLSignature signature = fac.newXMLSignature(sInfo, 
+				includeKeyInfo ? kInfo : null);
+		signature.sign(dsc);
+
+		Node node = dsc.getParent();
+		return node.getOwnerDocument();
+	}
+
+	private KeyInfo getKeyInfo(X509Certificate cert, XMLSignatureFactory fac)
+	{
+		KeyInfoFactory kif = fac.getKeyInfoFactory();
+		List x509Content = new ArrayList();
+		x509Content.add(cert.getSubjectX500Principal().getName());
+		x509Content.add(cert);
+		X509Data xd = kif.newX509Data(x509Content);
+		return kif.newKeyInfo(Collections.singletonList(xd));
+	}
+
+	public KeyStore.PrivateKeyEntry getKeyFromKeyStore(String keyStoreFile, char[] keyStorePassword, String alias)
+	{
+		FileInputStream keyFileStream = null;
+		try {
+			KeyStore ks = KeyStore.getInstance("PKCS12");
+			keyFileStream = new FileInputStream(keyStoreFile);
+			ks.load(keyFileStream, keyStorePassword);
+
+			if (alias == null)
+			{
+				Enumeration alias1 = ks.aliases();
+				if (ks.size() > 1)
+				{
+					throw new Exception("More that 1 Keys found in the key store. Please specify Key Alias property!");
+				}
+
+				alias1.hasMoreElements();
+				alias = (String)alias1.nextElement();
+			}
+			KeyStore.PrivateKeyEntry entry = (KeyStore.PrivateKeyEntry)ks.getEntry(alias, 
+					new KeyStore.PasswordProtection(keyStorePassword));
+			KeyStore.PrivateKeyEntry localPrivateKeyEntry1 = entry;
+			return localPrivateKeyEntry1;
+		}
+		catch (Exception e) {
+			return null;
+		} 
+		finally {
+			if (keyFileStream != null)
+				try {
+					keyFileStream.close();
+				} catch (IOException e) {
+				}
+		}
+
+	}
+
+	public boolean verifyXMLDigitalSign(String xmlDocument) throws SAXException, IOException, ParserConfigurationException, CertificateException, MarshalException, XMLSignatureException{
+		boolean validFlag = false;
+		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+		dbf.setNamespaceAware(true);
+		Document inputDocument = dbf.newDocumentBuilder().parse(new InputSource(new StringReader(xmlDocument)));
+		NodeList nl = inputDocument.getElementsByTagNameNS(XMLSignature.XMLNS, "Signature");
+		if(nl.getLength() == 0){
+			return false;
+		}
+		CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
+		InputStream is = getClass().getClassLoader().getResourceAsStream(publicKeyFileName);
+		X509Certificate cert = (X509Certificate) certFactory.generateCertificate(is);
+		PublicKey publicKey = cert.getPublicKey();
+		DOMValidateContext valContext = new DOMValidateContext(publicKey, nl.item(0));
+		XMLSignatureFactory fac = XMLSignatureFactory.getInstance("DOM");
+		XMLSignature signature = fac.unmarshalXMLSignature(valContext);
+		validFlag = signature.validate(valContext);
+		return validFlag;
+	}
+
+	public String signXMLClient(String xmlDocument, boolean includeKeyInfo)
+	{
+		try
+		{
+			DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+			dbf.setNamespaceAware(true);
+			Document inputDocument = dbf.newDocumentBuilder().parse(
+					new InputSource(new StringReader(xmlDocument)));
+			Document signedDocument = signUsingPrivateKey(inputDocument, includeKeyInfo);
+			StringWriter stringWriter = new StringWriter();
+			TransformerFactory tf = TransformerFactory.newInstance();
+			Transformer trans = tf.newTransformer();
+			trans.transform(new DOMSource(signedDocument), 
+					new StreamResult(stringWriter));
+			return stringWriter.getBuffer().toString();
+		} catch (Exception e) {
+			throw new RuntimeException(
+					"Error while digitally signing the XML document", e);
+		}
+	}
+
+	//Path for testing using Private Key -- String CkycSignUtilMetaData = "D:\\RajeshwariT\\Workspaces\\Eclipse2020\\CKYCAPI\\ST_LATEST\\cersai-download-source-auth\\src\\resources\\CKYC_UAT_Signed.pfx"; //changed for testing 
+
+	private Document signUsingPrivateKey(Document xmlDoc, boolean includeKeyInfo)
+			throws Exception
+	{
+		if (System.getenv("SKIP_DIGITAL_SIGNATURE") != null) {
+			return xmlDoc;
+		}
+
+		XMLSignatureFactory fac = XMLSignatureFactory.getInstance("DOM");
+
+		Reference ref = fac.newReference("", fac.newDigestMethod(
+				DigestMethod.SHA256, null), Collections.singletonList(fac
+						.newTransform(Transform.ENVELOPED, 
+								(XMLStructure)null)), null, null);
+
+		SignedInfo sInfo = fac
+				.newSignedInfo(fac.newCanonicalizationMethod(
+						CanonicalizationMethod.INCLUSIVE, 
+						(XMLStructure)null), fac
+						.newSignatureMethod(SignatureMethod.RSA_SHA1, null), 
+						Collections.singletonList(ref));
+
+		if (this.keyEntry == null) {
+			throw new RuntimeException(
+					"Key could not be read for digital signature. Please check value of signature alias and signature password, and restart the Auth Client");
+		}
+
+		X509Certificate x509Cert = (X509Certificate)this.keyEntry.getCertificate();
+
+		KeyInfo kInfo = getKeyInfo(x509Cert, fac);
+		DOMSignContext dsc = new DOMSignContext(this.keyEntry.getPrivateKey(), 
+				xmlDoc.getDocumentElement());
+		XMLSignature signature = fac.newXMLSignature(sInfo, 
+				includeKeyInfo ? kInfo : null);
+		signature.sign(dsc);
+
+		Node node = dsc.getParent();
+		return node.getOwnerDocument();
+	}
+
+	public boolean verifyXMLDigitalSignClient(String xmlDocument) throws SAXException, IOException, ParserConfigurationException, CertificateException, MarshalException, XMLSignatureException{
+		boolean validFlag = false;
+		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+		dbf.setNamespaceAware(true);
+		Document inputDocument = dbf.newDocumentBuilder().parse(new InputSource(new StringReader(xmlDocument)));
+		NodeList nl = inputDocument.getElementsByTagNameNS(XMLSignature.XMLNS, "Signature");
+		if(nl.getLength() == 0){
+			return false;
+		}
+		CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
+		InputStream is = new FileInputStream(publicKeyFileName);
+		X509Certificate cert = (X509Certificate) certFactory.generateCertificate(is);
+		PublicKey publicKey = cert.getPublicKey();
+		DOMValidateContext valContext = new DOMValidateContext(publicKey, nl.item(0));
+		XMLSignatureFactory fac = XMLSignatureFactory.getInstance("DOM");
+		XMLSignature signature = fac.unmarshalXMLSignature(valContext);
+		boolean sv = signature.getSignatureValue().validate(valContext);
+		validFlag = signature.validate(valContext);
+		return validFlag;
+	}
+
+}
