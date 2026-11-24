@@ -1,0 +1,222 @@
+package com.sbi.serviceImpl;
+
+import java.io.IOException;
+import java.io.StringReader;
+import java.io.StringWriter;
+import java.io.UnsupportedEncodingException;
+import java.security.GeneralSecurityException;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.SecureRandom;
+
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+
+import jakarta.xml.bind.JAXBContext;
+import jakarta.xml.bind.JAXBException;
+import jakarta.xml.bind.Marshaller;
+import jakarta.xml.bind.Unmarshaller;
+
+import org.apache.commons.codec.binary.Base64;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+
+import com.sbi.configuration.ExtractProperties;
+import com.sbi.dto.CERSAI_ENQUIRY_REQ;
+import com.sbi.dto.CERSAI_ENQUIRY_RES;
+import com.sbi.encryption.CkycAPISignUtil;
+import com.sbi.encryption.CkycEncrytpionAPIUtil;
+import com.sbi.encryption.SSLUtil;
+
+
+
+
+@Service
+public class CersaiEnquiryServiceImpl {
+
+	private static final Logger logger = LogManager.getLogger(CersaiEnquiryServiceImpl.class);
+
+	private static final String enquiryurl = ExtractProperties.getInstance().getProperty("UpFrontCersaiEnqURL");
+	String CkycSignUtilMetaData = ExtractProperties.getInstance().getProperty("CKYCPrivateKey");
+	String EnqCKYCKeyStorePathPassWord = ExtractProperties.getInstance().getProperty("ckycPrivKeyPassPhrase");
+
+	public Map<String, String> cersaiEnquiry(String ID_TYPE, String ID_NUMBER, String branchCode)
+			throws ClassNotFoundException, InstantiationException, IllegalAccessException, JAXBException,
+			KeyManagementException, NoSuchAlgorithmException {
+
+		String PIDdataXML = "";
+		logger.info("**********<<<<<<cersaiEnquiry>>>>>>>******");
+
+		CERSAI_ENQUIRY_REQ cersaiEnquiryRequest = new CERSAI_ENQUIRY_REQ();
+		Date currdate = new Date();
+		DateFormat formatter = new SimpleDateFormat("dd-MM-yyyy");
+		String cdate = formatter.format(currdate);
+		cersaiEnquiryRequest.setCHANNEL_ID("LOCAL");
+		cersaiEnquiryRequest.setPRODUCT_CODE("LOCALPC");
+		cersaiEnquiryRequest.setBRANCH_CODE(branchCode);
+		cersaiEnquiryRequest.setDATE_TIME(cdate);
+		cersaiEnquiryRequest.setID_TYPE(ID_TYPE);
+		cersaiEnquiryRequest.setID_NO(ID_NUMBER);
+
+		CERSAI_ENQUIRY_REQ erENC = new CERSAI_ENQUIRY_REQ();
+
+		String finalXML = ObjectToXML(cersaiEnquiryRequest);
+
+		logger.info("finalXML>>>>\n" + finalXML);
+		try {
+			finalXML.getBytes("UTF-8");
+		} catch (UnsupportedEncodingException e) {
+			e.printStackTrace();
+		}
+
+		CkycEncrytpionAPIUtil ceu = new CkycEncrytpionAPIUtil();
+	
+		SecretKey sessionKey = null;
+		try {
+			sessionKey = ceu.generateUnencodedSessionKey(256);
+		} catch (NoSuchAlgorithmException | NoSuchProviderException | UnsupportedEncodingException e) {
+			logger.info("Exception generateSessionKey >>> " + e.getMessage());
+			e.printStackTrace();
+		}
+		logger.info("sessionKey >> " + sessionKey);
+
+		// Generate 12 byte IV
+		byte[] IV = new byte[12];
+		SecureRandom random = new SecureRandom();
+		random.nextBytes(IV);
+		byte[] encReqData = null;
+		try {
+			encReqData = ceu.encryptgcm(finalXML.getBytes("UTF-8"), sessionKey, IV);
+		} catch (UnsupportedEncodingException e1) {
+			e1.printStackTrace();
+		}
+		logger.info("Encrypted Request >> \n" + new String(encReqData).toString());
+
+		// RSA encrypt the session key using Server's public certificate
+		byte[] encSessionKey = null;
+		try {
+			encSessionKey = ceu.encryptUsingCKYCPublicKey(sessionKey.getEncoded(), "");
+		} catch (IOException | GeneralSecurityException e) {
+			logger.info("Exception encrypt using public key");
+			e.printStackTrace();
+		}
+		logger.info("Cersai Session Key to Encrypt :: \n" + new String(encSessionKey));
+
+		erENC.setSESSION_KEY(new String(Base64.encodeBase64(encSessionKey)));
+		erENC.setDATA(new String(Base64.encodeBase64(encReqData)));
+		erENC.setCHANNEL_ID("LOCAL");
+
+		String finalXMLtoSend = "";
+		try {
+			finalXMLtoSend = ObjectToXML(erENC);
+			logger.info("Encrypted finalXMLtoSend >> \n" + finalXMLtoSend);
+		} catch (ClassNotFoundException | InstantiationException | IllegalAccessException | JAXBException e) {
+			logger.info("Exception converting Object to Xml");
+			e.printStackTrace();
+		}
+
+		String pwd2 = EnqCKYCKeyStorePathPassWord; // for CKYC_UAT_Signed.pfx
+		char[] pwdChar = pwd2.toCharArray();
+		logger.info("Step 1");
+		CkycAPISignUtil csu = new CkycAPISignUtil(CkycSignUtilMetaData, pwdChar, null);
+		logger.info("Step 3");
+		String finalXMLN = csu.signXMLClient(finalXMLtoSend, false);
+		logger.info("finalXMLN  to be sent>> \n" + finalXMLN);
+
+		RestTemplate rt = new RestTemplate();
+		HttpHeaders headers = new HttpHeaders();
+		headers.setContentType(MediaType.APPLICATION_XML);
+		logger.info(" Final XML to SEND::\n " + finalXMLN);
+		HttpEntity<String> req = new HttpEntity<String>(finalXMLN, headers);
+
+		logger.info("Server url>>>>>>>>>>>>>>>>>> " + enquiryurl);
+
+		String decryptedDataForLogging = "";
+		SSLUtil.turnOfSSLChecking();
+
+		final ResponseEntity<String> res = rt.exchange(enquiryurl, HttpMethod.POST, req, String.class);
+
+		String encryptedClientData = res.getBody();
+		logger.info("Encrypted  Data SENT BY SERVER ::\n" + encryptedClientData);
+
+		try {
+			PIDdataXML = interpretResponseFromCERSAI(encryptedClientData);
+			logger.info("CERSAI RESPONSE error>>>" + PIDdataXML);
+			if (PIDdataXML.equalsIgnoreCase("true")) {
+				if (csu.verifyXMLDigitalSignClient(encryptedClientData)) {
+					logger.info("Signature Verified");
+					JAXBContext jb1 = JAXBContext.newInstance(CERSAI_ENQUIRY_RES.class);
+					logger.info("Signature Verified");
+					Unmarshaller um1 = jb1.createUnmarshaller();
+					logger.info("Signature Verified");
+					StringReader sr1 = new StringReader(encryptedClientData);
+					logger.info("Signature Verified" + sr1);
+					CERSAI_ENQUIRY_RES ckyc_inq_server = (CERSAI_ENQUIRY_RES) um1.unmarshal(sr1);
+					byte[] sessionKeyBytes = ceu.decryptUsingPrivateKeyTest(
+							Base64.decodeBase64(ckyc_inq_server.getSESSION_KEY().getBytes()), "");
+					byte[] dataToDecrypt = Base64.decodeBase64(ckyc_inq_server.getDATA().getBytes());
+					decryptedDataForLogging = CkycEncrytpionAPIUtil.decryptgcm(dataToDecrypt, new SecretKeySpec(sessionKeyBytes, "AES"));
+					// PIDdataXML = decryptedDataForLogging;
+					logger.info("Decrypted Data for Logging >> " + decryptedDataForLogging);
+				} else {
+					logger.info("Signature could not be verified");
+				}
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		Map<String, String> responseMap2 = new HashMap<String, String>();
+
+		responseMap2.put("PIDdataXML", PIDdataXML);
+		responseMap2.put("decryptedDataForLogging", decryptedDataForLogging);
+
+		return responseMap2;
+	}
+
+	private String interpretResponseFromCERSAI(String responseFromCERSAI)
+			throws JAXBException, IOException, GeneralSecurityException {
+
+		JAXBContext jb = JAXBContext.newInstance(CERSAI_ENQUIRY_RES.class);
+		Unmarshaller um = jb.createUnmarshaller();
+		StringReader sr = new StringReader(responseFromCERSAI);
+
+		CERSAI_ENQUIRY_RES ckyc_inq_server = (CERSAI_ENQUIRY_RES) um.unmarshal(sr);
+		String error = ckyc_inq_server.getERROR();
+		logger.info("CERSAI RESPONSE error>>>" + error);
+
+		String error_remark = "";
+		if (error.equals("00")) {
+			error_remark = "true";
+		} else {
+			error_remark = error;
+		}
+		return error_remark;
+	}
+
+	private String ObjectToXML(Object className)
+			throws JAXBException, ClassNotFoundException, InstantiationException, IllegalAccessException {
+		StringWriter sw = new StringWriter();
+		JAXBContext jb = JAXBContext.newInstance(className.getClass());
+		Marshaller m = jb.createMarshaller();
+		m.setProperty(Marshaller.JAXB_FORMATTED_OUTPUT, true);
+		m.marshal(className, sw);
+		return sw.toString();
+	}
+
+
+}
