@@ -1,0 +1,93 @@
+package com.sbi.daoImpl;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+import com.sbi.configuration.DataBaseConfiguration;
+import com.sbi.configuration.ExtractProperties;
+import com.sbi.configuration.ServerConfiguration;
+import com.sbi.dao.CustomerDao;
+import com.sbi.dto.Customer;
+
+@Repository
+public class CustomerDaoImpl implements CustomerDao {
+
+	final String fetchStausSql=ExtractProperties.getInstance().getProperty("customer.status.query");
+	final String fetchKycDateSql=ExtractProperties.getInstance().getProperty("kyc.date.query");
+	final String insertHistorySql=ExtractProperties.getInstance().getProperty("Insert.history.query");
+	final String updateStatusSql=ExtractProperties.getInstance().getProperty("update.status.query");
+	final String updateStatusForRejection=ExtractProperties.getInstance().getProperty("update.status.for.rejection");
+
+	private static final JdbcTemplate jdbcTemplate = new JdbcTemplate(DataBaseConfiguration.getDataSource());
+	//private static final NamedParameterJdbcTemplate namedParameterJdbcTemplate =  new NamedParameterJdbcTemplate(DataBaseConfiguration.getDataSource());
+	private static String hostName = ServerConfiguration.getCachedHostname();
+	private static final Logger logger = (Logger) LogManager.getLogger(CustomerDaoImpl.class);
+
+	@Override
+	public String fetchCifStatusFromPerfiosTable(String cifNumber) {
+		try {
+			logger.info(" Query to fetch status from kyc perfios customer details \n"+fetchStausSql);
+			return jdbcTemplate.queryForObject(fetchStausSql, String.class, cifNumber);
+		}catch(Exception e) {
+			logger.error("Exception while fetching status from kyc perfios customer details ",e);
+			return "";
+		}
+	}
+
+	@Override
+	public String fetchKycDateOfBranch(String cif) {
+		try {
+			logger.info(" Query to fetch Date from kyc perfios customer details \n"+fetchStausSql);
+			return jdbcTemplate.queryForObject(fetchKycDateSql, String.class, cif);
+		}catch(Exception e) {
+			return "";
+		}
+	}
+
+	@Override
+	public void insertHistory(Customer customer,String ckyc,String customerFolder,String remarks) {
+		try {
+			logger.info(" Inserting history \n"+insertHistorySql);
+			jdbcTemplate.queryForObject(insertHistorySql, String.class, customer.cifNumber(),customer.accountNumber(),ckyc,customer.branchCode(),customerFolder,remarks,hostName);
+			//int a=jdbcTemplate.update(historyUpdateSql,customerDetails.getCif(),customerDetails.getAccountNumber(),customerDetails.getCkycNumber(),customerDetails.getBranchCode(),customerDetails.getZipFile(),customerDetails.getRemark(),hostName);
+		}catch(Exception e) {
+			logger.error(""+e.getMessage());
+		}
+	}
+
+//	@Override
+//	public void updateStatus(Customer customer, String remarks) {
+//		try {
+//			logger.info("update status sql \n"+updateStatusSql);
+//			logger.info("Customer CIF : "+ customer.cifNumber());
+//			jdbcTemplate.update(updateStatusSql, "ZP", remarks, customer.cifNumber());
+//		}catch(Exception e) {
+//			logger.error(" - "+e.getMessage());
+//		}
+//	}
+	
+	@Override
+	public void updateStatus(Customer customer, String remarks, String status) {
+		try {
+			logger.info("update status sql \n"+updateStatusSql);
+			logger.info("Customer CIF : "+ customer.cifNumber());
+			jdbcTemplate.update(updateStatusSql, status, remarks, customer.cifNumber());
+		}catch(Exception e) {
+			logger.error(" - "+e.getMessage());
+		}
+	}
+
+	@Override
+	public void updateStatusForRejection(Customer customer, String remarks) {
+		try {
+			logger.info("update status for rejection sql \n"+updateStatusForRejection);
+			logger.info("Customer CIF : "+ customer.cifNumber());
+			
+			jdbcTemplate.update(updateStatusForRejection,  remarks, customer.cifNumber());
+		}catch(Exception e) {
+			logger.error(" - "+e.getMessage());
+		}
+	}
+}
