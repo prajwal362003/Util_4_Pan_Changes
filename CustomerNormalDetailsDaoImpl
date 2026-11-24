@@ -1,0 +1,437 @@
+package com.sbi.daoImpl;
+
+import java.sql.Date;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+import com.sbi.configuration.DataBaseConfiguration;
+import com.sbi.dao.CustomerNormalDetailsDao;
+import com.sbi.dto.CkycEnqResponseBean;
+import com.sbi.dto.Customer;
+import com.sbi.dto.CustomerNormalDetailsEnquiryResponse;
+
+@Repository
+public class CustomerNormalDetailsDaoImpl implements CustomerNormalDetailsDao {
+
+	private static final JdbcTemplate jdbcTemplate = new JdbcTemplate(DataBaseConfiguration.getDataSource());
+	private static final NamedParameterJdbcTemplate namedParameterJdbcTemplate =  new NamedParameterJdbcTemplate(DataBaseConfiguration.getDataSource());
+	private static final Logger logger = (Logger) LogManager.getLogger(CbsApiDaoImpl.class);
+
+	@Override
+	public void savecbs67000IntoTables(CustomerNormalDetailsEnquiryResponse normDetails, CkycEnqResponseBean cbs60429Data, Customer customer) {
+
+		saveToKycPortal(cbs60429Data,normDetails,customer);
+		logger.info("updated portal details ");
+		updateKycAccountDetails(normDetails, customer.cifNumber());
+		logger.info("updated Additional details ");
+		updateCustomerDetails(normDetails, customer.cifNumber());
+		logger.info("updated customer details ");
+		updateKycIdentificationDetails(normDetails, customer.cifNumber());
+		logger.info("updated Identification details ");
+		updateAddressDetails(normDetails,customer.cifNumber());
+	}
+
+	public String saveToKycPortal(CkycEnqResponseBean plainReq,  CustomerNormalDetailsEnquiryResponse normDetails, Customer customer){
+		MapSqlParameterSource model = new MapSqlParameterSource();
+		model.addValue("v_cif_number", customer.cifNumber());
+		model.addValue("v_title_code", normDetails.getTITLE_CODE());
+
+		model.addValue("v_ckyc_number", plainReq.getCKYC_PERSONAL_DETAILS().getCKYC_NUMBER());
+		model.addValue("v_channel_id","");
+
+		model.addValue("v_branch_code", customer.branchCode());
+		model.addValue("v_first_name", plainReq.getCKYC_PERSONAL_DETAILS().getFIRST_NAME());
+		model.addValue("v_middle_name", plainReq.getCKYC_PERSONAL_DETAILS().getMIDDLE_NAME());
+		model.addValue("v_last_name", plainReq.getCKYC_PERSONAL_DETAILS().getLAST_NAME());
+
+		model.addValue("v_father_title", plainReq.getCKYC_PERSONAL_DETAILS().getFATHER_NAME_TITLE());
+		model.addValue("v_father_first_name", plainReq.getCKYC_PERSONAL_DETAILS().getFATHER_FIRST_NAME());
+		model.addValue("v_father_middle_name", plainReq.getCKYC_PERSONAL_DETAILS().getFATHER_MIDDLE_NAME());
+		model.addValue("v_father_last_name", plainReq.getCKYC_PERSONAL_DETAILS().getFATHER_LAST_NAME());
+		model.addValue("v_mother_title", plainReq.getCKYC_PERSONAL_DETAILS().getMOTHER_NAME_TITLE());
+		model.addValue("v_mother_first_name", plainReq.getCKYC_PERSONAL_DETAILS().getMOTHER_FIRST_NAME());
+		model.addValue("v_mother_middle_name", plainReq.getCKYC_PERSONAL_DETAILS().getMOTHER_MIDDLE_NAME());
+		model.addValue("v_mother_maiden_name", "");//monday
+		model.addValue("v_mother_last_name", plainReq.getCKYC_PERSONAL_DETAILS().getMOTHER_LAST_NAME());
+		model.addValue("v_spouse_title", plainReq.getCKYC_PERSONAL_DETAILS().getSPOUSE_NAME_TITLE());
+		model.addValue("v_spouse_first_name", plainReq.getCKYC_PERSONAL_DETAILS().getSPOUSE_FIRST_NAME());
+		model.addValue("v_spouse_middle_name", plainReq.getCKYC_PERSONAL_DETAILS().getSPOUSE_MIDDLE_NAME());
+		model.addValue("v_spouse_last_name", plainReq.getCKYC_PERSONAL_DETAILS().getSPOUSE_LAST_NAME());
+		model.addValue("v_maiden_name_title", plainReq.getCKYC_PERSONAL_DETAILS().getMAIDEN_NAME_TITLE());
+		model.addValue("v_maiden_first_name", plainReq.getCKYC_PERSONAL_DETAILS().getMAIDEN_FIRST_NAME());
+		model.addValue("v_maiden_last_name", plainReq.getCKYC_PERSONAL_DETAILS().getMAIDEN_LAST_NAME());
+		model.addValue("v_maiden_middle_name", plainReq.getCKYC_PERSONAL_DETAILS().getMAIDEN_MIDDLE_NAME());
+		model.addValue("v_pan_number", plainReq.getPAN_NUMBER());
+		model.addValue("v_date_of_pan_applied", null);
+		model.addValue("v_date_of_birth", plainReq.getCKYC_PERSONAL_DETAILS().getDATE_OF_BIRTH());
+		model.addValue("v_cbs_country", plainReq.getCKYC_ADDRESS_DETAILS().getCOUNTRY_CODE());
+		model.addValue("v_cbs_pin_code", plainReq.getCKYC_ADDRESS_DETAILS().getPOST_CODE());
+		logger.info("v_cbs_state" +  plainReq.getCKYC_ADDRESS_DETAILS().getStateCode());
+		model.addValue("v_cbs_state",  plainReq.getCKYC_ADDRESS_DETAILS().getStateCode()/*getStateCodename(plainReq.getSTATE_CODE())*/);//changed for Prod_test
+		model.addValue("v_cbs_city", plainReq.getCKYC_ADDRESS_DETAILS().getCITY_CODE());
+		model.addValue("v_cbs_line_1", plainReq.getCKYC_ADDRESS_DETAILS().getADDRESS_LINE_1());
+		model.addValue("v_cbs_line_2", plainReq.getCKYC_ADDRESS_DETAILS().getADDRESS_LINE_2());
+		model.addValue("v_cbs_line_3", plainReq.getCKYC_ADDRESS_DETAILS().getADDRESS_LINE_3());
+		model.addValue("v_cbs_sub_district", plainReq.getCKYC_ADDRESS_DETAILS().getSUB_DISTRICT());
+
+		logger.info("v_cbs_district" +  plainReq.getCKYC_ADDRESS_DETAILS().getDistrictCode());
+		model.addValue("v_cbs_district", getDirstrictCodeCorresponding(plainReq.getCKYC_ADDRESS_DETAILS().getDistrictCode(), plainReq.getCKYC_ADDRESS_DETAILS().getSTATE_UT_CODE()));
+
+		model.addValue("v_cbs_village_code", plainReq.getCKYC_ADDRESS_DETAILS().getVILLAGE_CODE());
+		model.addValue("v_id1_type", plainReq.getCKYC_PERSONAL_DETAILS().getPROOF_OF_ID());
+		model.addValue("v_id1_number", plainReq.getCKYC_PERSONAL_DETAILS().getID_NMUBER());
+		model.addValue("v_id1_issued_date", "");
+		model.addValue("v_id1_issued_at", "");
+		model.addValue("v_id1_expiry_date", plainReq.getCKYC_PERSONAL_DETAILS().getPASSPORT_EXPIRY_DATE());
+		model.addValue("v_id1_issued_by", "");
+		model.addValue("v_id2_type", plainReq.getCKYC_PERSONAL_DETAILS().getID2_TYPE());
+		model.addValue("v_id2_number", plainReq.getCKYC_PERSONAL_DETAILS().getID2_NUMBER());
+		model.addValue("v_ekyc_number", null);
+		model.addValue("v_ekyc_flag", null);
+		model.addValue("v_education_code", null);
+		model.addValue("v_occupation", plainReq.getCKYC_ACCOUNT_DETAILS().getOCCUPATION());
+
+		model.addValue("v_category_id", plainReq.getCKYC_ACCOUNT_DETAILS().getCATEGORY());
+		model.addValue("v_religion_id", plainReq.getCKYC_ACCOUNT_DETAILS().getRELIGION());
+
+		model.addValue("v_monthly_income", "");
+
+		model.addValue("v_gender_code", plainReq.getCKYC_PERSONAL_DETAILS().getGENDER());
+		model.addValue("v_marital_status", plainReq.getCKYC_PERSONAL_DETAILS().getMARITAL_STATUS());
+
+		model.addValue("v_occupation_type", plainReq.getCKYC_PERSONAL_DETAILS().getOCCUPATION_TYPE());
+
+		model.addValue("v_isd_code", "");
+		model.addValue("v_mobile_number", plainReq.getCKYC_PERSONAL_DETAILS().getMOBILE_NUMBER());
+		model.addValue("v_email_id", plainReq.getCKYC_PERSONAL_DETAILS().getEMAIL_ID());
+		model.addValue("v_nationality", plainReq.getCKYC_PERSONAL_DETAILS().getCITIZENSHIP());
+		model.addValue("v_resident_status", plainReq.getCKYC_PERSONAL_DETAILS().getRESIDENTIAL_STATUS());
+		model.addValue("v_customer_type", plainReq.getCUSTOMER_TYPE());
+		model.addValue("v_cbs_country_code", plainReq.getCKYC_ADDRESS_DETAILS().getCOUNTRY_CODE());
+		model.addValue("v_form60", "N");
+
+		model.addValue("v_same_as_proof_of_address", "1");
+		model.addValue("v_mother_father_flag", plainReq.getCKYC_PERSONAL_DETAILS().getRELATIVE_CODE());
+
+		model.addValue("v_uid_number", normDetails.getUID_NUMBER());
+
+		model.addValue("v_occupation_subType",normDetails.getOCCUPATION_SUB_TYPE());
+		model.addValue("v_annual_income", normDetails.getANNUAL_INCOME());
+		model.addValue("v_source_of_funds", normDetails.getSOURCE_OF_FUNDS());
+		model.addValue("v_domestic_risk", normDetails.getDOMESTIC_RISK());
+		model.addValue("v_cross_border_risk", normDetails.getCROSS_BORDER_RISK());
+
+		model.addValue("v_sub_dt_form60", normDetails.getFORM60_SUBMISSION_DATE());
+		model.addValue("v_tran_dt_form60", normDetails.getTRANSACTION_DATE());
+
+		model.addValue("v_agricultural_income", String.valueOf(Long.parseLong(normDetails.getAGRICULTURAL_INCOME())));
+		model.addValue("v_other_than_agricultural_income",String.valueOf(Long.parseLong(normDetails.getOTHER_THAN_AGRICULTURAL_INCOME())));
+
+		//v_SOURCE_OF_FUNDS		
+		//v_CROSS_BORDER_RISK	
+
+
+		int COUNT = 0;
+		try
+		{
+			String COUNTQ = "SELECT COUNT(*) FROM wfbranch.kyc_portal_details WHERE CIF_NUMBER='" + customer.cifNumber() + 
+					"'";
+			logger.info("KYC_CUSTOMER_DETAILS_COUNTQ : " + COUNTQ);
+		
+			COUNT = ((Integer)this.jdbcTemplate.queryForObject(COUNTQ, Integer.class)).intValue();
+
+			logger.info("KYC_CUSTOMER_DETAILS_COUNTQ : " + COUNT);
+		} catch (Exception e) {
+			e.printStackTrace();
+			logger.info("KYC_CUSTOMER_DETAILS ::::::::::::: " + e.getMessage());
+			COUNT = 0;
+		}
+		logger.info("KYC_YONO_UPDATE_FLAG_DETAILS_COUNT : " + COUNT); 
+		String KYC_CUSTOMER_DETAILS_UPDATE = "";
+
+		if (COUNT > 0){  
+			KYC_CUSTOMER_DETAILS_UPDATE = "update wfbranch.kyc_portal_details set cif_number = :v_cif_number,ckyc_number = :v_ckyc_number,status = 'BCA',branch_code = :v_branch_code,"
+					+ "insert_date = sysdate,modified_date = sysdate,title_code = :v_title_code,first_name = :v_first_name,middle_name = :v_middle_name,last_name = :v_last_name,"
+					+ "father_title = :v_father_title,father_first_name = :v_father_first_name,father_middle_name = :v_father_middle_name,father_last_name = :v_father_last_name,"
+					+ "mother_title = :v_mother_title,mother_first_name = :v_mother_first_name,mother_middle_name = :v_mother_middle_name,mother_maiden_name =:v_mother_maiden_name,"
+					+ "mother_last_name = :v_mother_last_name,spouse_title =:v_spouse_title,spouse_first_name = :v_spouse_first_name,spouse_middle_name = :v_spouse_middle_name,"
+					+ "spouse_last_name = :v_spouse_last_name,maiden_name_title = :v_maiden_name_title,maiden_first_name = :v_maiden_first_name,maiden_last_name = :v_maiden_last_name,"
+					+ "maiden_middle_name = :v_maiden_middle_name,pan_number = :v_pan_number,date_of_pan_applied = :v_date_of_pan_applied,date_of_birth = :v_date_of_birth,"
+					+ "income_tax_pan = :v_pan_number,cbs_country = :v_cbs_country,cbs_pin_code = :v_cbs_pin_code,cbs_state = :v_cbs_state,cbs_city = :v_cbs_city,cbs_line_1 = :v_cbs_line_1,"
+					+ "cbs_line_2 = :v_cbs_line_2,cbs_line_3 = :v_cbs_line_3,cbs_sub_district = :v_cbs_sub_district,cbs_district = :v_cbs_district,cbs_village_code =:v_cbs_village_code, "
+					+ "id1_type = :v_id1_type,id1_number = :v_id1_number,id1_issued_date = :v_id1_issued_date,id1_issued_at = :v_id1_issued_at,id1_expiry_date = :v_id1_expiry_date,"
+					+ "id1_issued_by = :v_id1_issued_by,id2_type = :v_id2_type,id2_number =:v_id2_number,ekyc_number = :v_ekyc_number,ekyc_flag = :v_ekyc_flag,education_code = :v_education_code,"
+					+ "occupation = :v_occupation,category_id = :v_category_id,religion_id = :v_religion_id,annual_income = :v_annual_income,gender_code = :v_gender_code,"
+					+ "marital_status = :v_marital_status, occupation_type = :v_occupation_type,isd_code = :v_isd_code,mobile_number = :v_mobile_number,email_id = :v_email_id,"
+					+ "nationality = :v_nationality,resident_status = :v_resident_status,same_as_proof_of_address = :v_same_as_proof_of_address,customer_type = :v_customer_type,"
+					+ "cbs_country_code = :v_cbs_country_code,mother_father_flag = :v_mother_father_flag,flow_type = 'IKC',sub_dt_form60 = :v_sub_dt_form60,tran_dt_form60 = :v_tran_dt_form60,"
+					+ "SOURCE_OF_FUNDSS=:v_source_of_funds,Channel_Id= :v_channel_id,UID_NUMBER= :v_uid_number,CROSS_BORDER_RISK= :v_cross_border_risk,DOMESTIC_RISK= :v_domestic_risk,"
+					+ "OCCUPATION_SUBTYPE= :v_occupation_subType, AGRI_INCOME =:v_agricultural_income, "
+					+ "OTHER_INCOME =:v_other_than_agricultural_income where cif_number= :v_cif_number";
+		}else{
+			KYC_CUSTOMER_DETAILS_UPDATE = "insert into wfbranch.kyc_portal_details (cif_number,ckyc_number,status,cpc_code,branch_code,insert_date,modified_date,title_code,first_name,middle_name,  last_name,father_title,father_first_name,father_middle_name,father_last_name,mother_title,mother_first_name,mother_middle_name,mother_maiden_name,mother_last_name,spouse_title,  spouse_first_name,spouse_middle_name,spouse_last_name,maiden_name_title,maiden_first_name,maiden_last_name,maiden_middle_name,pan_number,date_of_pan_applied,date_of_birth,  income_tax_pan,cbs_country,cbs_pin_code,cbs_state,cbs_city,cbs_line_1,cbs_line_2,cbs_line_3,cbs_sub_district,cbs_district,cbs_village_code,id1_type,id1_number,id1_issued_date,  id1_issued_at,id1_expiry_date,id1_issued_by,id2_type,id2_number,ekyc_number,ekyc_flag,education_code,occupation,category_id,religion_id,annual_income,gender_code,marital_status, occupation_type,isd_code,mobile_number,email_id,nationality,resident_status,customer_type,cbs_country_code,flow_type,form60,same_as_proof_of_address,SOURCE_OF_FUNDSS,Channel_Id,UID_NUMBER,CROSS_BORDER_RISK,DOMESTIC_RISK,OCCUPATION_SUBTYPE,AGRI_INCOME,OTHER_INCOME,sub_dt_form60,tran_dt_form60)"
+					+ " values   (:v_cif_number,:v_ckyc_number,'BCA',null,:v_branch_code,sysdate,sysdate,:v_title_code,:v_first_name,  :v_middle_name,:v_last_name,:v_father_title,:v_father_first_name,:v_father_middle_name,:v_father_last_name,:v_mother_title,:v_mother_first_name,:v_mother_middle_name,  :v_mother_maiden_name,:v_mother_last_name,:v_spouse_title,:v_spouse_first_name,:v_spouse_middle_name,:v_spouse_last_name,:v_maiden_name_title,:v_maiden_first_name,  :v_maiden_last_name,:v_maiden_middle_name,:v_pan_number,:v_date_of_pan_applied,:v_date_of_birth,:v_pan_number,:v_cbs_country,:v_cbs_pin_code,:v_cbs_state,:v_cbs_city,  :v_cbs_line_1,:v_cbs_line_2,:v_cbs_line_3,:v_cbs_sub_district,:v_cbs_district,:v_cbs_village_code,:v_id1_type,:v_id1_number,:v_id1_issued_date,:v_id1_issued_at,  :v_id1_expiry_date,:v_id1_issued_by,:v_id2_type,:v_id2_number,:v_ekyc_number,:v_ekyc_flag,:v_education_code,:v_occupation,:v_category_id,:v_religion_id,:v_annual_income, :v_gender_code,:v_marital_status, :v_occupation_type,:v_isd_code,:v_mobile_number,:v_email_id,:v_nationality,:v_resident_status,:v_customer_type,  :v_cbs_country_code,'IKC',:v_form60,:v_same_as_proof_of_address,:v_source_of_funds, :v_channel_id, :v_uid_number, :v_cross_border_risk, :v_domestic_risk, :v_occupation_subType, :v_agricultural_income, :v_other_than_agricultural_income,:v_sub_dt_form60,:v_tran_dt_form60)";
+		}
+
+		try
+		{
+			logger.info("KYC_CUSTOMER_DETAILS_UPDATE : " + KYC_CUSTOMER_DETAILS_UPDATE);
+			this.namedParameterJdbcTemplate.update(KYC_CUSTOMER_DETAILS_UPDATE, model);
+			logger.info("Record Updated Successfully ::::::::::::: " );
+			return "Record Updated Successfully";
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return "DATA NOT SUBMITTED TO LCPC";
+	}
+
+	public void updateKycAccountDetails(CustomerNormalDetailsEnquiryResponse normDetails, String cifNumber) {
+		int count =0;
+		String queryToUpdateAccountdetails="update kyc_additional_details  set occupation_subType=:occupationSubType, annual_income=:AnnualIncome,source_of_fundss=:SourceOfFund where cif_number_fk=:cifNumber";
+		logger.info("kyc addition details query : " + queryToUpdateAccountdetails);
+
+		MapSqlParameterSource mp = new MapSqlParameterSource();
+		mp.addValue("cifNumber",cifNumber);
+		mp.addValue("occupationSubType",normDetails.getOCCUPATION_SUB_TYPE());
+		mp.addValue("AnnualIncome",normDetails.getCUSTOMER_TURNOVER());
+		mp.addValue("SourceOfFund",normDetails.getSOURCE_OF_FUNDS());
+		try {
+			count= namedParameterJdbcTemplate.update(queryToUpdateAccountdetails, mp);
+		}catch(Exception e) {
+			logger.error(e.getLocalizedMessage());
+			logger.error(e);
+		}
+		logger.info("No of rows modified in kyc_additional_details :  "+count);
+	}
+
+	public void updateCustomerDetails(CustomerNormalDetailsEnquiryResponse normDetails, String cifNumber) {
+		int count =0;
+		String queryToUpdateCustomerdetails="update kyc_customer_details set SUBMISSION_DATE_FORM60=:form60_submission_date, TRANSACTIONDATE_FORM60=:transactiondate_form60, AGRI_INCOME=:agri_income, OTHER_AGRI_INCOME=:other_agri_income where cif_number=:cifNumber";
+		logger.info("kyc customer details query : " + queryToUpdateCustomerdetails);
+
+		MapSqlParameterSource mp = new MapSqlParameterSource();
+		mp.addValue("cifNumber",cifNumber);
+		mp.addValue("form60_submission_date",normDetails.getFORM60_SUBMISSION_DATE());
+		mp.addValue("transactiondate_form60",normDetails.getTRANSACTION_DATE());
+		mp.addValue("agri_income", String.valueOf(Long.parseLong(normDetails.getAGRICULTURAL_INCOME())));
+		mp.addValue("other_agri_income", String.valueOf(Long.parseLong(normDetails.getOTHER_THAN_AGRICULTURAL_INCOME())));
+
+		try {
+			count= namedParameterJdbcTemplate.update(queryToUpdateCustomerdetails, mp);
+		}catch(Exception e) {
+			logger.error(e.getLocalizedMessage());
+			logger.error(e);
+		}
+		logger.info("No of rows modified in kyc_customer_details :  "+count);
+	}
+
+	public void updateKycIdentificationDetails(CustomerNormalDetailsEnquiryResponse normDetails, String cifNumber) {
+
+		String identification_type=cbsMappingIdType(normDetails.getOVD_KYC_DOCUMENT_TYPE());
+		logger.info("identification_type : " + identification_type);
+
+		String expiryDate="";
+		if(identification_type.equalsIgnoreCase("A")){
+			expiryDate = normDetails.getPASSPORT_EXPIRY_DATE();
+		}else if(identification_type.equalsIgnoreCase("D")){
+			expiryDate = normDetails.getDRIVING_EXPIRY_DATE();
+		}
+
+		int count = 0;
+
+		MapSqlParameterSource mp = new MapSqlParameterSource();
+		mp.addValue("cifNumber",cifNumber);
+		mp.addValue("identification_type",identification_type);
+		mp.addValue("identity_number",normDetails.getOVD_KYC_DOCUMENT_DETAILS());
+		mp.addValue("expiry_date", parseDateToSql(expiryDate));//dd-mm-yyyy
+		mp.addValue("issued_at", normDetails.getID_ISSUED_AT());
+		mp.addValue("issued_date",parseDateToSql(normDetails.getID_ISSUED_DATE()));
+		//	mp.addValue("issued_by",normDetails.getID_ISSUED_BY());
+		mp.addValue("identification_type_2",normDetails.getSECOND_ID_TYPE());
+		mp.addValue("identity_number_2",normDetails.getSECOND_ID_NUMBER());
+		mp.addValue("cbs_id_type",normDetails.getOVD_KYC_DOCUMENT_TYPE()); 
+
+		String queryToUpdateIdentificationDetails = "update kyc_identification_details set identification_type=:identification_type,identity_number=:identity_number,expiry_date=:expiry_date, "
+				+ "issued_at=:issued_at,issued_date=:issued_date,identification_type_2=:identification_type_2, identity_number_2=:identity_number_2,cbs_id_type=:cbs_id_type where cif_number_fk=:cifNumber";
+		logger.info("kyc identification details query : " + queryToUpdateIdentificationDetails);//IDENTITY_NUMBER_2
+
+		try {
+			count = namedParameterJdbcTemplate.update(queryToUpdateIdentificationDetails, mp);
+		}catch(Exception e) {
+			logger.info(e.getLocalizedMessage());
+			logger.error(e);
+		}
+		logger.info("No of rows modified in kyc_identification_details : " + count);
+	}
+
+	private String cbsMappingIdType(String cbsCode) {
+		logger.info("OVD_KYC_DOCUMENT_TYPE : " + cbsCode);
+		String idTypeFetchQuery="select ckyc_code from gcdckyc.kyc_cbs_api_mapping where cbs_code=:cbs_code";
+		logger.info("idTypeFetchQuery : " + idTypeFetchQuery);
+		MapSqlParameterSource mp = new MapSqlParameterSource();
+		mp.addValue("cbs_code", cbsCode);
+		try {
+			
+			List<String> idTypeList=namedParameterJdbcTemplate.queryForList(idTypeFetchQuery, mp, String.class);
+			if(idTypeList==null||idTypeList.isEmpty()) {
+				return "";
+			}
+			if(idTypeList.size()>1) {
+				logger.info("Multiple rows found for cbs_code "+cbsCode+". Returning first value "+idTypeList.get(0));
+			}
+			return idTypeList.get(0);
+		}catch(Exception e) {
+			logger.error(e.getLocalizedMessage());
+			logger.error(e);
+			return "";
+		}
+	}
+
+	private Date parseDateToSql(String stringDate) {
+		Date sqlParsedExpiryDate=null;
+		try {
+			logger.info("stringDate : "+stringDate);
+			if(stringDate!=null&&!stringDate.trim().isEmpty()
+					&&!stringDate.contains("00000000")&&!stringDate.contains("00-00-0000")&&!stringDate.contains("99999999")) {
+				LocalDate localdate = LocalDate.parse(stringDate,
+						DateTimeFormatter.ofPattern("ddMMyyyy"));
+				sqlParsedExpiryDate=java.sql.Date.valueOf(localdate);
+				logger.info("sqlParsedExpiryDate : " + sqlParsedExpiryDate);
+			}
+		}catch(Exception e) {
+			logger.error(e.getLocalizedMessage());
+			logger.error("G > autami ",e);
+		}
+		return sqlParsedExpiryDate;
+	}
+
+	public void updateAddressDetails(CustomerNormalDetailsEnquiryResponse normDetails, String cifNumber) {
+		String addAddressFrom67000="update kyc_Address_details set district_code_fk=:distCode, sub_district=:subDistrict,address_city_village=:cityCode,address_pin_code=:pincode,state_code_fk=:statecode,village=:villageCode where cif_number_fk=:cifNumber and flag_regular_address='R'";
+		logger.info("kyc address details query : \n" + addAddressFrom67000);
+
+		int count = 0;
+
+		MapSqlParameterSource mp = new MapSqlParameterSource();
+		mp.addValue("cifNumber",cifNumber);
+		mp.addValue("distCode",normDetails.getDISTRICT_CODE());
+		mp.addValue("subDistrict",normDetails.getSUB_DISTRICT_CODE());
+		mp.addValue("cityCode", normDetails.getCITY_CODE());//dd-mm-yyyy
+		mp.addValue("pincode", normDetails.getPIN_CODE());
+		mp.addValue("statecode",getStateCode(normDetails.getSTATE_CODE()));
+		mp.addValue("villageCode",normDetails.getVILLAGE_CODE());
+
+		try {
+			count = namedParameterJdbcTemplate.update(addAddressFrom67000, mp);
+		}catch(Exception e) {
+			logger.info(e.getLocalizedMessage());
+			logger.error(e);
+		}
+		logger.info("No of rows modified in kyc_address_details : " + count);
+	}
+
+	private String getStateCode(String sId){
+		
+		String stateCodeSql = "select state_code FROM  gcdckyc.ckyc_state where state_id=:stateId";
+		MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+		//		String stateId = sId.length()==2 && sId.indexOf("0")==0 ?  sId.substring(1) : sId;
+		String stateId =  sId;
+		logger.info("stateID___________ :" + stateId);
+		mpMapSqlParameterSource.addValue("stateId", stateId);
+		String stateCode = "";
+		try{
+			stateCode = namedParameterJdbcTemplate.queryForObject(stateCodeSql, mpMapSqlParameterSource, String.class);
+		}catch(Exception e){
+			e.printStackTrace();
+			logger.info("getStateCode >>>>> "+e.getMessage());
+		}
+
+		logger.info("stateCode___________ :" + stateCode);
+		return stateCode;
+	}
+	
+	private String getDirstrictCodeCorresponding(String cbsDistrictId, String cbsStateCode, boolean districtIdFlag){
+		String dristrictCodeSql="";
+		String districtId;
+		try{
+			logger.info("__________________________________________________> "+ cbsStateCode+""+cbsDistrictId);
+			if(districtIdFlag){ // district id present
+				dristrictCodeSql = "select CKYC_DISTRICT_ID_FK FROM  gcdckyc.KYC_cbs_district where CBS_DISTRICT_ID=:cbsDistrictId";
+				MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+				mpMapSqlParameterSource.addValue("cbsDistrictId", cbsStateCode+""+cbsDistrictId); 
+				//mpMapSqlParameterSource.addValue("cbsDistrictId",cbsDistrictId);
+				logger.info("cbsStateCode " +  cbsStateCode);
+				logger.info("cbsDistrictId " +  cbsDistrictId);
+				logger.info("Combination getDistrictcode" + (cbsStateCode+""+cbsDistrictId));
+				districtId = namedParameterJdbcTemplate.queryForObject(dristrictCodeSql, mpMapSqlParameterSource, String.class);
+
+			}else{ // district name is present
+				dristrictCodeSql = "select CKYC_DISTRICT_ID_FK FROM  gcdckyc.KYC_cbs_district where CBS_DISTRICT_NAME=:cbsDistrictName";
+				MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+				mpMapSqlParameterSource.addValue("cbsDistrictName", cbsDistrictId);
+				districtId = namedParameterJdbcTemplate.queryForObject(dristrictCodeSql, mpMapSqlParameterSource, String.class);
+			}
+
+		}catch(Exception e){
+			logger.info("getDirstrictCode >>> "+e.getMessage());
+			districtId="";
+			try {
+				dristrictCodeSql = "select CKYC_DISTRICT_ID_FK FROM  gcdckyc.KYC_cbs_district where CKYC_DISTRICT_ID_FK=:cbsDistrictName";
+				MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+				mpMapSqlParameterSource.addValue("cbsDistrictName", cbsDistrictId);
+				districtId = namedParameterJdbcTemplate.queryForObject(dristrictCodeSql, mpMapSqlParameterSource, String.class);
+			}catch(Exception e1){
+				logger.info("getDirstrictCode >>> "+e1.getMessage());
+				districtId="";
+
+			}
+			logger.info("__________________________________________________> "+ districtId);
+		}
+		logger.info("dristrictCodeSql : "+dristrictCodeSql);
+		logger.info("cbsDistrictId : "+cbsDistrictId);
+
+
+		return districtId;
+	}
+	
+	private String getDirstrictCodeCorresponding(String cbsDistrictId, String cbsStateCode) {
+		String dristrictCodeSql = "";
+		String districtId = "";
+		
+		logger.info("cbsStateCode " + cbsStateCode);
+		logger.info("cbsDistrictId " + cbsDistrictId);
+
+		logger.info("cbsDistrictId before " + cbsDistrictId);
+		cbsDistrictId = cbsStateCode + cbsDistrictId;
+
+		logger.info("cbsDistrictId After" + cbsDistrictId);
+		try
+		{
+			MapSqlParameterSource mpMapSqlParameterSource = new MapSqlParameterSource();
+			mpMapSqlParameterSource.addValue("cbsDistrictId", cbsDistrictId);
+
+			dristrictCodeSql = "select CKYC_DISTRICT_ID_FK from gcdckyc.KYC_cbs_district where CBS_DISTRICT_ID=:cbsDistrictId";
+
+			logger.info("dristrictCodeSql >>>>>>>>>>>>>>>: " + dristrictCodeSql);
+
+			districtId = (String)this.namedParameterJdbcTemplate.queryForObject(dristrictCodeSql, mpMapSqlParameterSource, 
+					String.class);
+
+			logger.info("districtId : " + districtId);
+		}
+		catch (Exception e) {
+			logger.info("Exeption occurred while  : " + e.getLocalizedMessage());
+			e.printStackTrace();
+			logger.info("Exeption occurred while  : " + e.getStackTrace());
+		}
+		return districtId;
+	}
+
+}
