@@ -1,0 +1,669 @@
+package com.sbi.serviceImpl;
+
+import java.io.StringReader;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.Period;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.Map;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.apache.commons.lang3.StringUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+
+import com.sbi.dto.CersaiEnquiryResponse;
+import com.sbi.dto.CkycDetailsBean;
+import com.sbi.dto.CkycEnqResponseBean;
+import com.sbi.dto.Customer;
+import com.sbi.dao.CersaiEnqDAO;
+import com.sbi.dto.CERSAI_ENQUIRY_RES;
+import com.sbi.dto.CERSAI_ENQUIRY_RES_C;
+import com.sbi.dto.CKYC_ADDRESS_DETAILS;
+import com.sbi.dto.CKYC_PERSONAL_DETAILS;
+import com.sbi.dto.SearchResponsePID;
+import com.sbi.dto.upfrontEnqBean;
+import com.sbi.model.CersaiEnquiryData;
+import com.sbi.service.CersaiApiService;
+
+import jakarta.xml.bind.JAXBContext;
+import jakarta.xml.bind.JAXBException;
+import jakarta.xml.bind.Unmarshaller;
+
+@Service
+public class CersaiApiServiceImpl implements CersaiApiService {
+
+	final static Logger logger = LogManager.getLogger(CersaiApiServiceImpl.class);
+
+	@Autowired
+	private CersaiEnqDAO cersaiEnqDAO;
+
+	@Autowired
+	private CersaiEnquiryServiceImpl cersaiservice;
+
+	@Autowired
+	private UidSeqGeneratorDAOImpl uidsedao;
+
+	@Override
+	public CersaiEnquiryData fetchCersaidata(Customer customer, CkycEnqResponseBean cbs60429Data) {
+
+		String fisrtName = "";
+		String lastName = "";
+		int AGEA = 0;
+		String DOB = "";
+		Period AGE = null;
+		String ID_TYPE = "";
+		String ID_NUMBER = "";
+		String EnqCerxmlRes = "";
+		String PIDdataXML = "";
+		String Mobile_no = "";
+		String pincode = "";
+		String email = "";
+		String pinCode2 = "";
+		String mobileNumber2 = "";
+
+		logger.info(" cbs60429Data  " +cbs60429Data.toString());
+
+		boolean downloadflag=false;
+		//String dob ="";
+
+		/*	try{
+			cbsIdType = cbs_PersonalDetails.getPROOF_OF_ID();
+			cbsIdNumber = cbs_PersonalDetails.getID_NMUBER();//OVD_KYC_DOCUMENT_DETAILS
+			dob = cbs_PersonalDetails.getDATE_OF_BIRTH();
+			Mobile_no = cbs_PersonalDetails.getMOBILE_NUMBER();
+			email = cbs_PersonalDetails.getEMAIL_ID();
+			pincode = cbs_AddressDetails.getPOST_CODE();
+			pinCode2 = cbs_AddressDetails.getCORRESPONDENCE_ADDRESS_PIN_CODE();
+
+		}catch(Exception e) {
+			e.printStackTrace();
+			logger.error(" Exception : "+e.getMessage());
+		}*/
+
+		if (pincode == null || pincode.isEmpty()) {
+			pincode = pinCode2;
+		} else if (pincode.equalsIgnoreCase("Other") || pincode.equalsIgnoreCase("Others")) {
+			pincode = pinCode2;
+		}
+
+		ArrayList<upfrontEnqBean> enqBean = new ArrayList<upfrontEnqBean>();
+		enqBean = cersaiEnqDAO.upfrontEnq(customer.cifNumber());
+
+		ArrayList<upfrontEnqBean> enqBean1 = new ArrayList<upfrontEnqBean>();
+		enqBean1 = cersaiEnqDAO.getidtype(customer.cifNumber());
+
+		ArrayList<upfrontEnqBean> enqBean2 = new ArrayList<upfrontEnqBean>();
+
+		try {
+			enqBean2 = cersaiEnqDAO.getidtype1(enqBean1.get(0).getIdType());
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		ArrayList<upfrontEnqBean> enqBean3 = new ArrayList<upfrontEnqBean>();
+		try {  
+			enqBean3 = cersaiEnqDAO.getpincodeMobnoEmail(customer.cifNumber()); 
+			logger.info("enqBean3>>>>>>>>>>>>>>>>>>>>>>" + enqBean3.toString());
+			Mobile_no = enqBean3.get(0).getMobilenumber(); 
+			pincode =enqBean3.get(0).getPincode(); email=enqBean3.get(0).getEmailId();
+			pinCode2=enqBean3.get(0).getPinCode2();
+			mobileNumber2=enqBean3.get(0).getMobileNumber2();
+
+		} catch (Exception e) {
+			logger.info("Exception>>>>>>>>>>>>>>>> "+e.getLocalizedMessage());
+			e.printStackTrace(); 
+		}
+
+		CkycDetailsBean ckycdetails = cersaiEnqDAO.getCKYC_Details(customer.cifNumber());
+
+		Date date = null;
+		try {
+			String dob = enqBean.get(0).getDob();
+			date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(dob);
+			DOB = new SimpleDateFormat("MM/dd/yyyy").format(date);
+
+		} catch (java.text.ParseException e1) {
+			e1.printStackTrace();
+		} catch (Exception e) {
+			logger.info("Exception>>>>>>>>>>>>>>>> "+e.getLocalizedMessage());
+			e.printStackTrace();
+		}
+		logger.info("Date of birth>>>>>>>>>>>>>>>>>>>>>>" + DOB);
+
+		// Method for Age
+		SimpleDateFormat formatter = new SimpleDateFormat("MM/dd/yyyy");
+		Date date1 = null;
+
+		try {
+			date1 = formatter.parse(DOB);
+			Instant instant = date1.toInstant();
+			ZonedDateTime zone = instant.atZone(ZoneId.systemDefault());
+			LocalDate givenDate = zone.toLocalDate();
+			AGE = Period.between(givenDate, LocalDate.now());
+			AGEA = AGE.getYears();
+		} catch (java.text.ParseException e) {
+			e.printStackTrace();
+		}
+
+		logger.info("(ckycdetails.getACCOUNT_TYPE_FLAG()>>>>>>" + ckycdetails.getACCOUNT_TYPE_FLAG());
+
+		logger.info("INSIDE NI ELSE BLOCK ");
+		// fisrtName = enqBean.get(0).getFirstName();
+		// lastName = enqBean.get(0).getLastName();
+		fisrtName = ckycdetails.getAPPLICANT_FIRST_NAME();
+		// String middleName = ckycdetails.getAPPLICANT_MIDDLE_NAME();
+		lastName = ckycdetails.getAPPLICANT_LAST_NAME();
+		logger.info("fisrtName ::: " + fisrtName + "  lastName ::: " + lastName);
+		logger.info("OUT SIDE NI ELSE BLOCK ");
+
+		// CERSAI Enq Start
+
+		logger.info("<<<<<<<<Start of CustomerEnquiry>>>>>>>");
+
+		String cersaiIDType = "";
+
+		CERSAI_ENQUIRY_RES cersaiPidData = new CERSAI_ENQUIRY_RES();
+		CERSAI_ENQUIRY_RES_C cersaiPidDatac = new CERSAI_ENQUIRY_RES_C();
+
+		logger.info("||ID_TYPE ||>>>>>" + ID_TYPE);
+
+		logger.info("enqBean2 ID_TYPENUMBER " + enqBean2.get(0).getID_TYPENUMBER());
+
+		// }else {
+		try {
+			if(!enqBean.get(0).getIT_PAN().isEmpty()) {
+				logger.info("IF pan is present");
+
+				ID_NUMBER = enqBean.get(0).getIT_PAN();
+				ID_TYPE = "C";
+
+				if (!ID_NUMBER.equalsIgnoreCase("") && !ID_NUMBER.equalsIgnoreCase(" ") && !ID_TYPE.equalsIgnoreCase("")
+						&& !ID_TYPE.equalsIgnoreCase(" ") && ID_TYPE != null && ID_NUMBER != null) {
+
+					logger.info("ID number is not null >>>>>>>>>");
+					Map<String, String> res = null;
+					try {
+						res = cersaiservice.cersaiEnquiry(ID_TYPE, ID_NUMBER, ckycdetails.getBRANCH_CODE());
+					} catch (KeyManagementException | ClassNotFoundException | InstantiationException
+							| IllegalAccessException | NoSuchAlgorithmException | JAXBException e2) {
+						// TODO Auto-generated catch block
+						e2.printStackTrace();
+					}
+
+					PIDdataXML = res.get("PIDdataXML");
+					logger.info("CERSAI RESPONSE PIDdataXML error>>>" + PIDdataXML);
+
+					if (PIDdataXML.equalsIgnoreCase("true")) {
+						EnqCerxmlRes = res.get("decryptedDataForLogging");
+
+
+						try {
+							Document xmlDoc = convertStringToXMLDoc(EnqCerxmlRes);
+
+							logger.info("XML Doc First Node Value is :" + xmlDoc.getFirstChild().getNodeName());
+							logger.info("--------------------------<ENQUIRY_RES>--------------------------");
+							NodeList list = xmlDoc.getElementsByTagName("ENQUIRY_RES");
+							logger.info("list >>>>>>  " + list);
+							for (int temp = 0; temp < list.getLength(); temp++) {
+
+								Node node = list.item(temp);
+								if (node.getNodeType() == Node.ELEMENT_NODE) {
+
+									Element element = (Element) node;
+									logger.info(
+											"element.getElementsByTagName(\"ID_LIST\").item(0).getTextContent().trim()>>>> "
+													+ element.getElementsByTagName("ID_LIST").item(0).getTextContent()
+													.trim());
+
+									logger.info("TYPE>>>>>>>>>>>>>>>>>>>> "
+											+ element.getElementsByTagName("TYPE").item(0).getTextContent().trim());
+									logger.info("ID>>>>>>>>>>>>>>>>>>>> "
+											+ element.getElementsByTagName("ID").item(0).getTextContent().trim());
+									cersaiIDType = element.getElementsByTagName("ID_LIST").item(0).getTextContent().trim();
+
+								}
+							}
+
+						} catch (Exception e) {
+							logger.info("No record found");
+						}
+
+						try {
+							logger.info("<<<<<<<<<|| Inside IF of PAN Enq ||>>>>>>>>>");
+
+							JAXBContext jb = JAXBContext.newInstance(CERSAI_ENQUIRY_RES_C.class);
+							Unmarshaller um = jb.createUnmarshaller();
+							StringReader sr = new StringReader(EnqCerxmlRes);
+
+							cersaiPidDatac = (CERSAI_ENQUIRY_RES_C) um.unmarshal(sr);
+
+							ArrayList<SearchResponsePID> searchResponseList = cersaiPidDatac.getSearchResponsePID();
+
+							cersaiPidData.setBRANCH_CODE(cersaiPidDatac.getBRANCH_CODE());
+							cersaiPidData.setCHANNEL_ID(cersaiPidDatac.getCHANNEL_ID());
+							cersaiPidData.setAPPLICANT_NAME(searchResponseList.get(0).getAPPLICANT_NAME());
+							cersaiPidData.setAPPLICANT_FATHERS_NAME(searchResponseList.get(0).getAPPLICANT_FATHERS_NAME());
+							cersaiPidData.setAPPLICANT_AGE(searchResponseList.get(0).getAPPLICANT_AGE());
+							cersaiPidData.setIDTYPE(cersaiIDType);
+							cersaiPidData.setUPDATED_DATE(searchResponseList.get(0).getUPDATED_DATE());
+							cersaiPidData.setCKYC_NO(searchResponseList.get(0).getCKYC_NO());
+							cersaiPidData.setREMARKS(searchResponseList.get(0).getREMARKS());
+							cersaiPidData.setKYC_DATE(searchResponseList.get(0).getKYC_DATE());
+							cersaiPidData.setCONSTITUTION_TYPE(searchResponseList.get(0).getCONSTITUTION_TYPE());
+							cersaiPidData.setPLACE_OF_INCORPORATION(searchResponseList.get(0).getPLACE_OF_INCORPORATION());
+							cersaiPidData.setCKYC_REFERENCE_ID(searchResponseList.get(0).getCKYC_REFERENCE_ID());
+
+							cersaiEnqDAO.insertCersaiEnqResponceNew(cersaiPidData,Mobile_no, pincode,enqBean.get(0).getDob(), customer.cifNumber(),email,pinCode2,mobileNumber2);
+							downloadflag=true;
+
+							logger.info("AGE of the person " + AGEA);
+
+							try {
+								enqBean2 = cersaiEnqDAO.getidtype1(cersaiIDType);
+
+							} catch (Exception e) {
+								logger.info("Exception to show cersai ID_TYPE  ");
+
+							}
+							logger.info("<<<<<<<<<|| END IF of PAN Enq ||>>>>>>>>>");
+
+						} catch (Exception e) {
+
+							logger.info("<<<<<<<<<<<<<<<<<||CERSAI PAN ENQ FAIL||>>>>>>>>>>>>>>>>>");
+							e.printStackTrace();
+
+						}
+						logger.info("<<<<<<<<<<<<<<<<<||CERSAI ENQ RESPONSE||>>>>>>>>>>>>>>>>>");
+
+					} else {
+						logger.info("Inside else part enquiry with OVD pan not success");
+						if (enqBean1.get(0).getIdType().equalsIgnoreCase("E")) {
+							logger.info("Inside IF");
+							String Last4char = enqBean1.get(0).getMasked_aadhar();
+							logger.info("Last4char :: " + Last4char);
+
+							if (!Last4char.equals("") && Last4char != null) {
+
+								Last4char = Last4char.substring(8, 12);
+
+								logger.info("Aadhar Number from DB >>>>>>>>>>>>>>>>: " + enqBean.get(0).getADHAAR());
+
+								try {
+									String DOB1 = new SimpleDateFormat("dd-MM-yyyy").format(date);
+									logger.info("Date of birth 1>>>>>>>>>>>>>>>>>>>>>>" + DOB1);
+									String EidType = Last4char + "|" + enqBean.get(0).getFirstName()
+											+ enqBean.get(0).getMiddleName() + enqBean.get(0).getLastName() + "|" + DOB1
+											+ "|" + enqBean.get(0).getGender();
+									logger.info("EidType >>>>>>>>>>>>>>>>: " + EidType);
+
+									ID_NUMBER = EidType.replace("  ", "");
+									ID_NUMBER = EidType.replace(" ", "");
+								} catch (Exception e1) {
+									logger.info("INSIDE NI CATCH BLOCK of IF ");
+									ID_NUMBER = " ";
+									// e1.printStackTrace();
+								}
+								ID_TYPE = enqBean1.get(0).getIdType();
+								logger.info("EidType >>>>>>>>>>>>>>>>: " + ID_NUMBER);
+							} else {
+								//// ----------------------------------
+								String maskAadhar = "";
+
+								String adharIdentityRefNo = enqBean1.get(0).getIdNumber();
+								logger.info("adharIdentityRefNo >>>" + adharIdentityRefNo);
+								if (adharIdentityRefNo != null && !adharIdentityRefNo.trim().equals("")
+										&& !StringUtils.isNumeric(adharIdentityRefNo)
+										&& !StringUtils.containsIgnoreCase(adharIdentityRefNo, "XXXXXXXX")) {
+									logger.info("Ref number received in identification");
+									String adharNo = uidsedao.UIDRefToUID(adharIdentityRefNo);
+									if (adharNo.equalsIgnoreCase("vaulterror")) {
+										maskAadhar = "";
+
+									} else {
+										if (adharNo != null && adharNo.length() == 12) {
+											maskAadhar = adharNo.replace(adharNo.substring(0, 8), "XXXXXXXX");
+
+										} else {
+											maskAadhar = "";
+
+										}
+									}
+								} else { // Numeric/Masked aadhar number received
+									// from CBS
+									if (adharIdentityRefNo != null && adharIdentityRefNo.length() == 12) {
+										logger.info("Numeric UID number received in identification");
+
+										maskAadhar = adharIdentityRefNo.replace(adharIdentityRefNo.substring(0, 8),
+												"XXXXXXXX");
+
+									} else {
+										maskAadhar = "";
+
+									}
+								}
+
+								if (!maskAadhar.equals("") && maskAadhar != null) {
+
+									Last4char = maskAadhar.substring(8, 12);
+
+									logger.info("Aadhar Number from DB >>>>>>>>>>>>>>>>: " + enqBean.get(0).getADHAAR());
+
+									try {
+										String DOB1 = new SimpleDateFormat("dd-MM-yyyy").format(date);
+										logger.info("Date of birth 1>>>>>>>>>>>>>>>>>>>>>>" + DOB1);
+										String EidType = Last4char + "|" + enqBean.get(0).getFirstName()
+												+ enqBean.get(0).getMiddleName() + enqBean.get(0).getLastName() + "|" + DOB1
+												+ "|" + enqBean.get(0).getGender();
+										logger.info("EidType >>>>>>>>>>>>>>>>: " + EidType);
+
+										ID_NUMBER = EidType.replace("  ", "");
+										ID_NUMBER = EidType.replace(" ", "");
+									} catch (Exception e1) {
+										logger.info("INSIDE NI CATCH BLOCK of IF ");
+										ID_NUMBER = " ";
+										// e1.printStackTrace();
+									}
+									ID_TYPE = enqBean1.get(0).getIdType();
+									logger.info("EidType >>>>>>>>>>>>>>>>: " + ID_NUMBER);
+								}
+								// ------------------
+
+								logger.info("Aadhar Number not present");
+							}
+
+							logger.info("inside else if if " + enqBean2.get(0).getID_TYPENUMBER());
+
+							// ID_NUMBER = ID_NUMBER;
+
+						} else {
+							ID_NUMBER = enqBean1.get(0).getIdNumber();
+							ID_TYPE = enqBean1.get(0).getIdType();
+							logger.info("Inside id type is other than E ID_TYPE" + ID_TYPE + "  and ID_NUMBER" + ID_NUMBER);
+						}
+						logger.info("ckycdetailsBranchCode>>>>>>>>> :::: " + ckycdetails.getBRANCH_CODE());
+						Map<String, String> res1 = null;
+						try {
+							res1 = cersaiservice.cersaiEnquiry(ID_TYPE, ID_NUMBER, ckycdetails.getBRANCH_CODE());
+						} catch (KeyManagementException | ClassNotFoundException | InstantiationException
+								| IllegalAccessException | NoSuchAlgorithmException | JAXBException e1) {
+							e1.printStackTrace();
+						}
+
+						PIDdataXML = res1.get("PIDdataXML");
+						logger.info("CERSAI RESPONSE PIDdataXML error>>>" + PIDdataXML);
+
+						// if(!EnqCerxmlRes.equalsIgnoreCase("No records found")) {
+						if (PIDdataXML.equalsIgnoreCase("true")) {
+							EnqCerxmlRes = res1.get("decryptedDataForLogging");
+
+							try {
+								Document xmlDoc = convertStringToXMLDoc(EnqCerxmlRes);
+
+								logger.info("XML Doc First Node Value is :" + xmlDoc.getFirstChild().getNodeName());
+								// get <KycResponse>
+								logger.info("--------------------------<ENQUIRY_RES>--------------------------");
+								NodeList list = xmlDoc.getElementsByTagName("ENQUIRY_RES");
+								logger.info("list >>>>>>  " + list);
+								for (int temp = 0; temp < list.getLength(); temp++) {
+
+									Node node = list.item(temp);
+									// logger.info("node >>>>>> "+node);
+									if (node.getNodeType() == Node.ELEMENT_NODE) {
+										Element element = (Element) node;
+										logger.info(
+												"element.getElementsByTagName(\"ID_LIST\").item(0).getTextContent().trim()>>>> "
+														+ element.getElementsByTagName("ID_LIST").item(0).getTextContent()
+														.trim());
+
+										logger.info("TYPE>>>>>>>>>>>>>>>>>>>> "
+												+ element.getElementsByTagName("TYPE").item(0).getTextContent().trim());
+										logger.info("ID>>>>>>>>>>>>>>>>>>>> "
+												+ element.getElementsByTagName("ID").item(0).getTextContent().trim());
+										cersaiIDType = element.getElementsByTagName("ID_LIST").item(0).getTextContent()
+												.trim();
+									}
+								}
+							} catch (Exception e) {
+								logger.info("No record found");
+							}
+
+							try {
+								logger.info("Inside else");
+								JAXBContext jb = JAXBContext.newInstance(CERSAI_ENQUIRY_RES.class);
+								Unmarshaller um = jb.createUnmarshaller();
+								StringReader sr = new StringReader(EnqCerxmlRes);
+								cersaiPidData = (CERSAI_ENQUIRY_RES) um.unmarshal(sr);
+
+								cersaiEnqDAO.insertCersaiEnqResponceNew(cersaiPidData,Mobile_no, pincode,enqBean.get(0).getDob(), customer.cifNumber(),email,pinCode2,mobileNumber2);
+								downloadflag=true;
+								try {
+									enqBean2 = cersaiEnqDAO.getidtype1(cersaiIDType);
+								} catch (Exception e) {
+									logger.info("Exception to show cersai ID_TYPE  ");
+								}
+								// CERSAI Enq End
+							} catch (Exception e) {
+								logger.info("<<<<<<<<<<<<<<<<<||CERSAI ENQ FAIL For other OVD||>>>>>>>>>>>>>>>>>");
+							}
+							logger.info("<<<<<<<<<<<<<<<<<||CERSAI ENQ RESPONSE||>>>>>>>>>>>>>>>>>");
+
+						} else {
+							logger.info("Enquiry not success with both the ID type");
+						}
+					}
+				} else {
+					logger.info("Id number is null >>>>>>>>>");
+				}
+
+			} else {
+				logger.info("Else pan not present");
+				if (enqBean1.get(0).getIdType().equalsIgnoreCase("E")) {
+					logger.info("Inside IF");
+					String Last4char = enqBean1.get(0).getMasked_aadhar();
+					logger.info("Last4char :: " + Last4char);
+
+					if (!Last4char.equals("") && Last4char != null) {
+
+						Last4char = Last4char.substring(8, 12);
+
+						logger.info("Aadhar Number from DB >>>>>>>>>>>>>>>>: " + enqBean.get(0).getADHAAR());
+
+						try {
+							String DOB1 = new SimpleDateFormat("dd-MM-yyyy").format(date);
+							logger.info("Date of birth 1>>>>>>>>>>>>>>>>>>>>>>" + DOB1);
+							String EidType = Last4char + "|" + enqBean.get(0).getFirstName()
+									+ enqBean.get(0).getMiddleName() + enqBean.get(0).getLastName() + "|" + DOB1 + "|"
+									+ enqBean.get(0).getGender();
+							logger.info("EidType >>>>>>>>>>>>>>>>: " + EidType);
+
+							ID_NUMBER = EidType.replace("  ", "");
+							ID_NUMBER = EidType.replace(" ", "");
+						} catch (Exception e1) {
+							logger.info("INSIDE NI CATCH BLOCK of IF ");
+							ID_NUMBER = " ";
+							// e1.printStackTrace();
+						}
+						ID_TYPE = enqBean1.get(0).getIdType();
+						logger.info("EidType >>>>>>>>>>>>>>>>: " + ID_NUMBER);
+					} else {
+						//// ----------------------------------
+						String maskAadhar = "";
+
+						String adharIdentityRefNo = enqBean1.get(0).getIdNumber();
+						logger.info("adharIdentityRefNo >>>" + adharIdentityRefNo);
+						if (adharIdentityRefNo != null && !adharIdentityRefNo.trim().equals("")
+								&& !StringUtils.isNumeric(adharIdentityRefNo)
+								&& !StringUtils.containsIgnoreCase(adharIdentityRefNo, "XXXXXXXX")) {
+							logger.info("Ref number received in identification");
+							String adharNo = uidsedao.UIDRefToUID(adharIdentityRefNo);
+							if (adharNo.equalsIgnoreCase("vaulterror")) {
+								maskAadhar = "";
+
+							} else {
+								if (adharNo != null && adharNo.length() == 12) {
+									maskAadhar = adharNo.replace(adharNo.substring(0, 8), "XXXXXXXX");
+
+								} else {
+									maskAadhar = "";
+
+								}
+							}
+						} else { // Numeric/Masked aadhar number received
+							// from CBS
+							if (adharIdentityRefNo != null && adharIdentityRefNo.length() == 12) {
+								logger.info("Numeric UID number received in identification");
+
+								maskAadhar = adharIdentityRefNo.replace(adharIdentityRefNo.substring(0, 8), "XXXXXXXX");
+
+							} else {
+								maskAadhar = "";
+
+							}
+						}
+
+						if (!maskAadhar.equals("") && maskAadhar != null) {
+
+							Last4char = maskAadhar.substring(8, 12);
+
+							logger.info("Aadhar Number from DB >>>>>>>>>>>>>>>>: " + enqBean.get(0).getADHAAR());
+
+							try {
+								String DOB1 = new SimpleDateFormat("dd-MM-yyyy").format(date);
+								logger.info("Date of birth 1>>>>>>>>>>>>>>>>>>>>>>" + DOB1);
+								String EidType = Last4char + "|" + enqBean.get(0).getFirstName()
+										+ enqBean.get(0).getMiddleName() + enqBean.get(0).getLastName() + "|" + DOB1 + "|"
+										+ enqBean.get(0).getGender();
+								logger.info("EidType >>>>>>>>>>>>>>>>: " + EidType);
+
+								ID_NUMBER = EidType.replace("  ", "");
+								ID_NUMBER = EidType.replace(" ", "");
+							} catch (Exception e1) {
+								logger.info("INSIDE NI CATCH BLOCK of IF ");
+								ID_NUMBER = " ";
+								// e1.printStackTrace();
+							}
+							ID_TYPE = enqBean1.get(0).getIdType();
+							logger.info("EidType >>>>>>>>>>>>>>>>: " + ID_NUMBER);
+						}
+						// ------------------
+
+						logger.info("Aadhar Number not present");
+					}
+
+					logger.info("inside else if if " + enqBean2.get(0).getID_TYPENUMBER());
+
+					// ID_NUMBER = ID_NUMBER;
+
+				} else {
+					ID_NUMBER = enqBean1.get(0).getIdNumber();
+					ID_TYPE = enqBean1.get(0).getIdType();
+				}
+
+				logger.info("ckycdetailsBranchCode>>>>>>>>> :::: " + ckycdetails.getBRANCH_CODE());
+				Map<String, String> res = null;
+				try {
+					res = cersaiservice.cersaiEnquiry(ID_TYPE, ID_NUMBER, ckycdetails.getBRANCH_CODE());
+				} catch (KeyManagementException | ClassNotFoundException | InstantiationException | IllegalAccessException
+						| NoSuchAlgorithmException | JAXBException e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				}
+
+				PIDdataXML = res.get("PIDdataXML");
+				logger.info("CERSAI RESPONSE PIDdataXML error>>>" + PIDdataXML);
+
+				// if(!EnqCerxmlRes.equalsIgnoreCase("No records found")) {
+				if (PIDdataXML.equalsIgnoreCase("true")) {
+					EnqCerxmlRes = res.get("decryptedDataForLogging");
+					// logger.info("CERSAI RESPONSE EnqCerxmlRes error>>>" +
+					// EnqCerxmlRes);
+					try {
+						Document xmlDoc = convertStringToXMLDoc(EnqCerxmlRes);
+
+						logger.info("XML Doc First Node Value is :" + xmlDoc.getFirstChild().getNodeName());
+						// get <KycResponse>
+						logger.info("--------------------------<ENQUIRY_RES>--------------------------");
+						NodeList list = xmlDoc.getElementsByTagName("ENQUIRY_RES");
+						logger.info("list >>>>>>  " + list);
+						for (int temp = 0; temp < list.getLength(); temp++) {
+
+							Node node = list.item(temp);
+							// logger.info("node >>>>>> "+node);
+							if (node.getNodeType() == Node.ELEMENT_NODE) {
+
+								Element element = (Element) node;
+								logger.info("element.getElementsByTagName(\"ID_LIST\").item(0).getTextContent().trim()>>>> "
+										+ element.getElementsByTagName("ID_LIST").item(0).getTextContent().trim());
+
+								logger.info("TYPE>>>>>>>>>>>>>>>>>>>> "
+										+ element.getElementsByTagName("TYPE").item(0).getTextContent().trim());
+								logger.info("ID>>>>>>>>>>>>>>>>>>>> "
+										+ element.getElementsByTagName("ID").item(0).getTextContent().trim());
+								cersaiIDType = element.getElementsByTagName("ID_LIST").item(0).getTextContent().trim();
+							}
+						}
+					} catch (Exception e) {
+						logger.info("No record found");
+					}
+
+					try {
+						logger.info("Inside else");
+						JAXBContext jb = JAXBContext.newInstance(CERSAI_ENQUIRY_RES.class);
+						Unmarshaller um = jb.createUnmarshaller();
+						StringReader sr = new StringReader(EnqCerxmlRes);
+						cersaiPidData = (CERSAI_ENQUIRY_RES) um.unmarshal(sr);
+						logger.info("cersaiPidData >>>>>>>>>>>>>> :" + cersaiPidData.toString());
+
+						cersaiEnqDAO.insertCersaiEnqResponceNew(cersaiPidData,Mobile_no, pincode,enqBean.get(0).getDob(), customer.cifNumber(),email,pinCode2,mobileNumber2);
+						downloadflag=true;
+
+					} catch (Exception e) {
+						logger.info("<<<<<<<<<<<<<<<<<||CERSAI ENQ FAIL For other OVD||>>>>>>>>>>>>>>>>>");
+					}
+					logger.info("<<<<<<<<<<<<<<<<<||CERSAI ENQ RESPONSE||>>>>>>>>>>>>>>>>>");
+
+				} else {
+					logger.info("Maker/CersaiSuggestionListUpdate");
+				}
+			}	
+
+		}catch(Exception e) {
+			logger.error("Exception "+e.getLocalizedMessage());
+		}
+		return new CersaiEnquiryData(cersaiPidData.getCKYC_NO(),cersaiPidData.getCKYC_REFERENCE_ID(), cersaiPidData.getUPDATED_DATE(),downloadflag);	
+	}
+
+
+	private static Document convertStringToXMLDoc(String strXMLValue) {
+		try {
+			return DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(new InputSource(new StringReader(strXMLValue)));
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return null;
+	}
+
+
+	@Override
+	public void insertToDownloadCersaiData(String cifNumber, CersaiEnquiryResponse cersaiEnqResponse) {
+		cersaiEnqDAO.insertToDownloadCersaiData(cifNumber,cersaiEnqResponse);	
+	}
+
+}
