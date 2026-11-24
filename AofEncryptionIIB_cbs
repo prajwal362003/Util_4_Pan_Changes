@@ -1,0 +1,186 @@
+package com.sbi.encryption;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.InvalidKeyException;
+import java.security.KeyStore;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.Signature;
+import java.security.SignatureException;
+import java.security.KeyStore.PrivateKeyEntry;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.util.Enumeration;
+
+import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.KeyGenerator;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+
+import org.apache.commons.codec.binary.Base64;
+import org.apache.logging.log4j.LogManager; import org.apache.logging.log4j.Logger;
+
+import com.sbi.configuration.ExtractProperties;
+
+
+public class AofEncryptionIIB_cbs {
+	
+	private PublicKey publicKey;
+	private PrivateKeyEntry privateKey;
+	private PublicKey accountEnquiryKey;
+	
+	
+	private static final String privateKeyPassphrase = ExtractProperties.getInstance().getProperty("ckycPrivKeyPassPhrase");
+	
+	private static final String publicKeyFileName = "/IBM/Resources/ENC_EIS.cer";
+	//private static final String accountEnquiryFileName = 	ExtractProperties.getInstance().getProperty("EISPublicKey");//"/IBM/Resources/ENC_EIS.cer";
+	
+	private static final String tellerPublicKeyFileName = "/IBM/Resources/ENC_EIS.cer";
+	private static final String PANPublicKeyFileName = "/IBM/Resources/ENC_EIS.cer";
+	private static final String HRMSPublicKeyFileName =  "/IBM/Resources/ENC_EIS.cer";
+	
+	private static final Logger logger = LogManager.getLogger(AofEncryptionIIB_cbs.class);
+	private static final String EISpublicKeyFileName = ExtractProperties.getInstance().getProperty("EISPublicKey");
+
+	public  AofEncryptionIIB_cbs() {
+		
+		InputStream is = null;
+
+	    
+	    InputStream isPan = null;
+	    InputStream isTeller = null;
+	    InputStream isHrms = null;
+		try {
+			CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
+			logger.info("EISpublicKeyFileName : "+EISpublicKeyFileName);
+			is=new FileInputStream(EISpublicKeyFileName);
+		
+			X509Certificate cert = (X509Certificate) certFactory.generateCertificate(is);
+			this.publicKey = cert.getPublicKey();
+			
+			logger.info("			this.publicKey : "+			this.publicKey);
+			
+		} catch (Exception e) {
+			e.printStackTrace();
+			throw new RuntimeException("Could not intialize encryption module",e);
+		} finally {
+			
+			if(is != null){
+				try {
+					is.close();
+				} catch (IOException e) {
+					logger.info(e.getMessage(), e);
+				}	
+			}
+			if(isPan != null){
+				try {
+					isPan.close();
+				} catch (IOException e) {
+					logger.info(e.getMessage(), e);
+				}	
+			}
+			if(isTeller != null){
+				try {
+					isTeller.close();
+				} catch (IOException e) {
+					logger.info(e.getMessage(), e);
+				}	
+			}
+		}
+	}
+
+	
+	public byte[] generateKey(int keySize) throws NoSuchAlgorithmException
+	  {
+	    KeyGenerator kgen = KeyGenerator.getInstance("AES");
+	    kgen.init(keySize);
+	    SecretKey key = kgen.generateKey();
+	    byte[] symmKey = key.getEncoded();
+	    return symmKey;
+	  }
+
+	  public String encryptUsingAES(byte[] key, byte[] initVector, String request) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, InvalidAlgorithmParameterException, IllegalStateException, IllegalBlockSizeException, BadPaddingException {
+	    IvParameterSpec iv = new IvParameterSpec(initVector);
+	    SecretKeySpec skeySpec = new SecretKeySpec(key, "AES");
+	    Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5PADDING");
+	    cipher.init(1, skeySpec, iv);
+	    byte[] encrypted = cipher.doFinal(request.getBytes());
+	    return new String(Base64.encodeBase64(encrypted));
+	  }
+	  
+	  
+	  
+	  
+
+	  public byte[] encryptUsingPublicKey(byte[] data) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, IllegalStateException, IllegalBlockSizeException, BadPaddingException {
+	    Cipher pkCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+	    pkCipher.init(1, this.publicKey);
+	    byte[] encSessionKey = pkCipher.doFinal(data);
+	    return Base64.encodeBase64(encSessionKey);
+	  }
+
+	 
+
+	  public String decryptResponse(byte[] key, byte[] initVector, String encryptedResponse) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, InvalidAlgorithmParameterException, IllegalStateException, IllegalBlockSizeException, BadPaddingException {
+	    IvParameterSpec iv = new IvParameterSpec(initVector);
+	    SecretKeySpec skeySpec = new SecretKeySpec(key, "AES");
+	    Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5PADDING");
+	    cipher.init(2, skeySpec, iv);
+	    byte[] orginal = cipher.doFinal(Base64.decodeBase64(encryptedResponse.getBytes()));
+	    return new String(orginal);
+	  }
+
+	  
+
+	  public byte[] encryptAccEnqKeyUsingPublicKey(byte[] data) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, IllegalStateException, IllegalBlockSizeException, BadPaddingException {
+	    Cipher pkCipher = Cipher.getInstance("RSA/ECB/OAEPPadding");
+	    pkCipher.init(1, this.accountEnquiryKey);
+	    byte[] encSessionKey = pkCipher.doFinal(data);
+	    return Base64.encodeBase64(encSessionKey);
+	  }
+
+	  public String signUsingPrivateKey(String data, String privateKeyFileName) throws NoSuchAlgorithmException, InvalidKeyException, UnsupportedEncodingException, SignatureException {
+	    PrivateKey privateKey = getKeyFromKeyStore(privateKeyFileName, privateKeyPassphrase.toCharArray(), null);
+	    Signature signature = Signature.getInstance("SHA256withRSA");
+	    signature.initSign(privateKey);
+	    byte[] dataByte = data.getBytes("UTF-8");
+	    signature.update(dataByte);
+	    byte[] signedData = signature.sign();
+	    return new String(Base64.encodeBase64(signedData));
+	  }
+	 
+	  public PrivateKey getKeyFromKeyStore(String keyStoreFile, char[] keyStorePassword, String alias) {
+
+		     try (InputStream keyFileStream = new FileInputStream(keyStoreFile)) {
+				
+				KeyStore ks = KeyStore.getInstance("PKCS12");
+				ks.load(keyFileStream, keyStorePassword);
+				
+				if (alias == null) {
+					Enumeration<String> alias1 = ks.aliases();
+					if (ks.size() > 1) {
+						throw new Exception("More that 1 Keys found in the key store. Please specify Key Alias property!");
+					}
+					alias1.hasMoreElements();
+					alias = alias1.nextElement();
+				}
+				KeyStore.PrivateKeyEntry entry = (KeyStore.PrivateKeyEntry)ks.getEntry(alias, new KeyStore.PasswordProtection(keyStorePassword));	
+				return entry.getPrivateKey();
+			} catch (Exception e) {
+		      logger.error("Exception : Wrong Key", e);
+		      return null;
+		    }
+			
+		}
+
+
+}
